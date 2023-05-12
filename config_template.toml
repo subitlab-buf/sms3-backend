@@ -1,0 +1,6 @@
+[mail_smtp]
+server = ""
+port = 465
+username = ""
+password = ""
+address = ""
