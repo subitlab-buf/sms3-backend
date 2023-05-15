@@ -11,6 +11,7 @@ async fn main() -> tide::Result<()> {
     tide::log::with_level(tide::log::LevelFilter::Debug);
     account::INSTANCE.refresh_all().await;
 
+    // Basic account controlling
     app.at("/api/account/create")
         .post(account::handle::create_account);
     app.at("/api/account/verify")
@@ -21,9 +22,12 @@ async fn main() -> tide::Result<()> {
         .post(account::handle::logout_account);
     app.at("/api/account/signout")
         .post(account::handle::sign_out_account);
+    app.at("/api/account/view")
+        .post(account::handle::view_account);
     app.at("/api/account/edit")
         .post(account::handle::edit_account);
 
+    // Account managing
     app.at("/api/account/manage/create")
         .post(account::handle::manage::make_account);
     app.at("/api/account/manage/view")
@@ -48,10 +52,17 @@ impl RequirePermissionContext {
     /// Indicates whether this context's token and permissions is valid.
     pub async fn valid(&self, permissions: Permissions) -> Result<bool, AccountManagerError> {
         let account_manager = account::INSTANCE.deref();
-        match account_manager.index().read().await.get(&self.user_id) {
+        match account_manager
+            .index()
+            .read()
+            .await
+            .get(&self.user_id)
+            .map(|e| *e)
+        {
             Some(index) => {
+                account_manager.refresh(self.user_id).await;
                 let b = account_manager.inner().read().await;
-                let account = b.get(*index).unwrap().read().await;
+                let account = b.get(index).unwrap().read().await;
                 Ok(match account.deref() {
                     account::Account::Unverified(_) => {
                         return Err(AccountManagerError::Account(

@@ -1,9 +1,12 @@
 use super::AccountError;
 use super::House;
+use super::Permissions;
 use super::UserAttributes;
+use super::UserMetadata;
 use crate::account::Permission;
 use crate::account::{Account, AccountManagerError};
 use async_std::sync::RwLock;
+use chrono::DateTime;
 use chrono::Utc;
 use serde::Deserialize;
 use std::collections::hash_map::DefaultHasher;
@@ -322,11 +325,72 @@ struct AccountSignOutDescriber {
     password: String,
 }
 
+/// Get a user's account details.
+pub async fn view_account(mut req: Request<()>) -> tide::Result {
+    let account_manager = &super::INSTANCE;
+    let describer: ViewAccountDescriber = req.body_json().await?;
+    match describer.context.valid(vec![]).await {
+        Ok(_) => {
+            let b = account_manager.inner().read().await;
+            let a = b
+                .get(
+                    *account_manager
+                        .index()
+                        .read()
+                        .await
+                        .get(&describer.context.user_id)
+                        .unwrap(),
+                )
+                .unwrap()
+                .read()
+                .await;
+            match a.deref() {
+                Account::Unverified(_) => unreachable!(),
+                Account::Verified { attributes, .. } => {
+                    let result = ViewAccountResult {
+                        id: a.id(),
+                        metadata: a.metadata().unwrap(),
+                        permissions: a.permissions(),
+                        registration_time: attributes.registration_time.clone(),
+                        registration_ip: attributes.registration_ip.clone(),
+                    };
+                    Ok(json!({
+                        "status": "success",
+                        "result": result,
+                    })
+                    .into())
+                }
+            }
+        }
+        Err(err) => Ok::<tide::Response, tide::Error>(
+            json!({
+                "status": "error",
+                "error": err.to_string(),
+            })
+            .into(),
+        ),
+    }
+}
+
+#[derive(Deserialize)]
+struct ViewAccountDescriber {
+    context: crate::RequirePermissionContext,
+}
+
+#[derive(Serialize)]
+struct ViewAccountResult {
+    id: u64,
+    metadata: UserMetadata,
+    permissions: Permissions,
+    registration_time: DateTime<Utc>,
+    registration_ip: Option<String>,
+}
+
 /// Edit account metadata.
 pub async fn edit_account(mut req: Request<()>) -> tide::Result {
     let account_manager = &super::INSTANCE;
     let describer: AccountEditDescriber = req.body_json().await?;
-    match describer.context.valid(Vec::new()).await {
+    match describer.context.valid(vec![]).await {
         Ok(_) => {
             let b = account_manager.inner().read().await;
             let mut a = b
@@ -429,11 +493,11 @@ impl AccountEditMetadataType {
 /// Manage accounts for admins.
 pub mod manage {
     use crate::account::verify::Tokens;
-    use crate::account::{self, AccountError, House, Permission, Permissions, UserMetadata};
+    use crate::account::{self, AccountError, House, Permission, Permissions};
     use crate::account::{Account, UserAttributes};
     use crate::RequirePermissionContext;
     use async_std::sync::RwLock;
-    use chrono::{DateTime, Utc};
+    use chrono::Utc;
     use serde::Deserialize;
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
@@ -604,13 +668,13 @@ pub mod manage {
                         Account::Verified { attributes, .. } => {
                             let permissions = account.permissions();
                             if !describer.context.valid(permissions.clone()).await.unwrap() {}
-                            ViewAccountResult::Ok {
+                            ViewAccountResult::Ok(super::ViewAccountResult {
                                 id: *aid,
                                 metadata: account.metadata().unwrap(),
                                 permissions,
                                 registration_time: attributes.registration_time.clone(),
                                 registration_ip: attributes.registration_ip.clone(),
-                            }
+                            })
                         }
                     })
                 }
@@ -640,17 +704,8 @@ pub mod manage {
 
     #[derive(Serialize)]
     enum ViewAccountResult {
-        Err {
-            id: u64,
-            error: String,
-        },
-        Ok {
-            id: u64,
-            metadata: UserMetadata,
-            permissions: Permissions,
-            registration_time: DateTime<Utc>,
-            registration_ip: Option<String>,
-        },
+        Err { id: u64, error: String },
+        Ok(super::ViewAccountResult),
     }
 
     /// Modify an account from admin side.
