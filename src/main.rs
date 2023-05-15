@@ -35,9 +35,12 @@ async fn main() -> tide::Result<()> {
     Ok(())
 }
 
+/// A context for checking the validation of action an account performs with permission requirements.
 #[derive(Deserialize)]
 pub struct RequirePermissionContext {
+    /// The access token of this account.
     pub token: u64,
+    /// The only id of this account.
     pub user_id: u64,
 }
 

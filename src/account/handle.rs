@@ -504,7 +504,7 @@ pub mod manage {
                         token_expiration_time: 5,
                     },
                     tokens: Tokens::new(),
-                    verify: None,
+                    verify: account::UserVerifyVariant::None,
                 };
                 drop(a);
                 if account_manager

@@ -79,7 +79,7 @@ pub enum Account {
         /// This account's token manager.
         tokens: verify::Tokens,
         /// The verify context of this account exists in some conditions (ex. forget password).
-        verify: Option<verify::Context>,
+        verify: UserVerifyVariant,
     },
 }
 
@@ -130,7 +130,7 @@ impl Account {
                 },
                 attributes,
                 tokens: verify::Tokens::new(),
-                verify: None,
+                verify: UserVerifyVariant::None,
             }
         } else {
             return Err(AccountError::UserRegisteredError);
@@ -247,9 +247,8 @@ impl Account {
     }
 }
 
-//TODO impl this and put into account
-#[derive(Deserialize, Serialize)]
-pub enum UserVierfyVariant {
+#[derive(Deserialize, Serialize, Debug)]
+pub enum UserVerifyVariant {
     None,
     ForgetPassword(verify::Context),
 }
@@ -435,8 +434,11 @@ impl AccountManager {
                 let mut w = account.write().await;
                 if let Account::Verified { tokens, verify, .. } = w.deref_mut() {
                     tokens.refresh();
-                    if verify.as_ref().map(|v| v.is_expired()).unwrap_or(false) {
-                        *verify = None;
+                    if match verify {
+                        UserVerifyVariant::None => false,
+                        UserVerifyVariant::ForgetPassword(e) => e.is_expired(),
+                    } {
+                        *verify = UserVerifyVariant::None;
                     }
                 }
             }
@@ -462,8 +464,11 @@ impl AccountManager {
                     match account.write().await.deref_mut() {
                         Account::Verified { tokens, verify, .. } => {
                             tokens.refresh();
-                            if verify.as_ref().map(|v| v.is_expired()).unwrap_or(false) {
-                                *verify = None;
+                            if match verify {
+                                UserVerifyVariant::None => false,
+                                UserVerifyVariant::ForgetPassword(e) => e.is_expired(),
+                            } {
+                                *verify = UserVerifyVariant::None;
                             }
                         }
                         _ => (),
