@@ -3,11 +3,15 @@ use super::House;
 use super::Permissions;
 use super::UserAttributes;
 use super::UserMetadata;
+use super::UserVerifyVariant;
+use crate::account::verify;
 use crate::account::Permission;
 use crate::account::{Account, AccountManagerError};
 use async_std::sync::RwLock;
 use chrono::DateTime;
+use chrono::Duration;
 use chrono::Utc;
+use rand::Rng;
 use serde::Deserialize;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -488,6 +492,96 @@ impl AccountEditMetadataType {
         }
         Ok(())
     }
+}
+
+/// Initiazlize a reset password verification.
+pub async fn reset_password(mut req: Request<()>) -> tide::Result {
+    let account_manager = &super::INSTANCE;
+    let describer: ResetPasswordDescriber = req.body_json().await?;
+    for account in account_manager.inner().read().await.iter() {
+        let ar = account.read().await;
+        if ar.email() == &describer.email {
+            return match ar.deref() {
+                Account::Unverified(_) => Ok(json!({
+                    "status": "error",
+                    "error": "Target account is unverified",
+                })
+                .into()),
+                Account::Verified { verify, .. } => {
+                    if matches!(verify, UserVerifyVariant::None) {
+                        drop(ar);
+                        let mut aw = account.write().await;
+                        let e = match aw.deref_mut() {
+                            Account::Unverified(_) => unreachable!(),
+                            Account::Verified { verify, .. } => {
+                                *verify = UserVerifyVariant::ForgetPassword({
+                                    let cxt = verify::Context {
+                                        email: describer.email,
+                                        code: {
+                                            let mut rng = rand::thread_rng();
+                                            rng.gen_range(100000..999999)
+                                        },
+                                        expire_time: match Utc::now()
+                                            .naive_utc()
+                                            .checked_add_signed(Duration::minutes(15))
+                                        {
+                                            Some(e) => e,
+                                            _ => {
+                                                return Ok(json!({
+                                                    "status": "error",
+                                                    "error": "Date out of range",
+                                                })
+                                                .into())
+                                            }
+                                        },
+                                    };
+                                    match cxt.send_verify().await {
+                                        Ok(_) => (),
+                                        Err(err) => {
+                                            let e = format!(
+                                                "Error while sending verification mail: {}",
+                                                err
+                                            );
+                                            return Ok(json!({
+                                                "status": "error",
+                                                "error": e,
+                                            })
+                                            .into());
+                                        }
+                                    }
+                                    cxt
+                                });
+                                Ok(json!({
+                                    "status": "success",
+                                })
+                                .into())
+                            }
+                        };
+                        if !aw.save() {
+                            error!("Error when saving account {}", aw.email());
+                        }
+                        e
+                    } else {
+                        Ok(json!({
+                            "status": "error",
+                            "error": "Target account is during verification period",
+                        })
+                        .into())
+                    }
+                }
+            };
+        }
+    }
+    Ok(json!({
+        "status": "error",
+        "error": "Target account not found",
+    })
+    .into())
+}
+
+#[derive(Deserialize)]
+struct ResetPasswordDescriber {
+    email: lettre::Address,
 }
 
 /// Manage accounts for admins.

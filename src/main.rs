@@ -26,6 +26,8 @@ async fn main() -> tide::Result<()> {
         .post(account::handle::view_account);
     app.at("/api/account/edit")
         .post(account::handle::edit_account);
+    app.at("/api/account/resetpassword")
+        .post(account::handle::reset_password);
 
     // Account managing
     app.at("/api/account/manage/create")

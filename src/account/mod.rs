@@ -11,7 +11,7 @@ use std::{
     fmt::Display,
     fs::{self, File},
     hash::{Hash, Hasher},
-    io::Write,
+    io::{Read, Write},
     ops::{Deref, DerefMut},
 };
 use tide::log::error;
@@ -227,9 +227,9 @@ impl Account {
     /// Save this account and return whether if this account was saved successfully.
     #[must_use = "The save result should be handled"]
     pub fn save(&self) -> bool {
-        if let Ok(mut file) = File::create(format!("./data/accounts/{}.json", self.id())) {
+        if let Ok(mut file) = File::create(format!("./data/accounts/{}.toml", self.id())) {
             file.write_all(
-                &mut match serde_json::to_string(&self) {
+                &mut match toml::to_string(&self) {
                     Ok(e) => e,
                     _ => return false,
                 }
@@ -361,14 +361,22 @@ pub struct AccountManager {
 }
 
 impl AccountManager {
-    /// Read and create an account manager from `./accounts`.
+    /// Read and create an account manager from `./data/accounts`.
     pub fn new() -> Self {
         let mut vec = Vec::new();
         let mut index = HashMap::new();
         let mut i = 0;
         for dir in fs::read_dir("./data/accounts").unwrap() {
             if let Ok(e) = dir.map(|e| {
-                serde_json::from_reader::<_, Account>(File::open(e.path()).unwrap()).unwrap()
+                toml::from_str::<Account>(&{
+                    let mut string = String::new();
+                    File::open(e.path())
+                        .unwrap()
+                        .read_to_string(&mut string)
+                        .unwrap();
+                    string
+                })
+                .unwrap()
             }) {
                 index.insert(e.id(), i);
                 vec.push(RwLock::new(e));
