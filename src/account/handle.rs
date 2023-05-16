@@ -85,56 +85,69 @@ pub async fn verify_account(mut req: Request<()>) -> tide::Result {
     let account_manager = &super::INSTANCE;
     let describer: AccountVerifyDescriber = req.body_json().await?;
     for account in account_manager.inner().read().await.iter() {
-        if {
-            let a = account.read().await;
-            if a.email() == &describer.email {
-                let id = a.id();
-                drop(a);
-                account_manager.refresh(id).await;
-                true
-            } else {
-                false
+        match &describer.variant {
+            AccountVerifyVariant::Activiate {
+                email,
+                name,
+                id,
+                phone,
+                house,
+                organization,
+                password,
+            } => {
+                if {
+                    let a = account.read().await;
+                    if a.email() == email {
+                        let id = a.id();
+                        drop(a);
+                        account_manager.refresh(id).await;
+                        true
+                    } else {
+                        false
+                    }
+                } {
+                    let mut a = account.write().await;
+                    if let Err(err) = a.verify(
+                        describer.code,
+                        super::AccountVerifyVariant::Activiate(UserAttributes {
+                            email: email.clone(),
+                            name: name.clone(),
+                            school_id: id,
+                            phone,
+                            house,
+                            organization,
+                            permissions: vec![Permission::View, Permission::Post],
+                            registration_time: Utc::now(),
+                            registration_ip: req.remote().map(|s| s.to_string()),
+                            password_hash: {
+                                let mut hasher = DefaultHasher::new();
+                                password.hash(&mut hasher);
+                                hasher.finish()
+                            },
+                            token_expiration_time: 5,
+                        }),
+                    ) {
+                        return Ok::<tide::Response, tide::Error>(
+                            json!({
+                                "status": "error",
+                                "error": AccountManagerError::Account(a.id(), err).to_string(),
+                            })
+                            .into(),
+                        );
+                    }
+                    if !a.save() {
+                        error!("Error when saving account {}", a.email());
+                    }
+                    info!("Account verified: {} (id: {})", a.email(), a.id());
+                    return Ok::<tide::Response, tide::Error>(
+                        json!({
+                            "status": "success",
+                        })
+                        .into(),
+                    );
+                }
             }
-        } {
-            let mut a = account.write().await;
-            if let Err(err) = a.verify(
-                describer.code,
-                UserAttributes {
-                    email: describer.email,
-                    name: describer.name,
-                    school_id: describer.id,
-                    phone: describer.phone,
-                    house: describer.house,
-                    organization: describer.organization,
-                    permissions: vec![Permission::View, Permission::Post],
-                    registration_time: Utc::now(),
-                    registration_ip: req.remote().map(|s| s.to_string()),
-                    password_hash: {
-                        let mut hasher = DefaultHasher::new();
-                        describer.password.hash(&mut hasher);
-                        hasher.finish()
-                    },
-                    token_expiration_time: 5,
-                },
-            ) {
-                return Ok::<tide::Response, tide::Error>(
-                    json!({
-                        "status": "error",
-                        "error": AccountManagerError::Account(a.id(), err).to_string(),
-                    })
-                    .into(),
-                );
-            }
-            if !a.save() {
-                error!("Error when saving account {}", a.email());
-            }
-            info!("Account verified: {} (id: {})", a.email(), a.id());
-            return Ok::<tide::Response, tide::Error>(
-                json!({
-                    "status": "success",
-                })
-                .into(),
-            );
+            AccountVerifyVariant::ResetPassword { email, password } => todo!(),
         }
     }
     Ok::<tide::Response, tide::Error>(
@@ -149,13 +162,24 @@ pub async fn verify_account(mut req: Request<()>) -> tide::Result {
 #[derive(Deserialize)]
 struct AccountVerifyDescriber {
     code: u32,
-    email: lettre::Address,
-    name: String,
-    id: u32,
-    phone: u64,
-    house: Option<House>,
-    organization: Option<String>,
-    password: String,
+    variant: AccountVerifyVariant,
+}
+
+#[derive(Deserialize)]
+enum AccountVerifyVariant {
+    Activiate {
+        email: lettre::Address,
+        name: String,
+        id: u32,
+        phone: u64,
+        house: Option<House>,
+        organization: Option<String>,
+        password: String,
+    },
+    ResetPassword {
+        email: lettre::Address,
+        password: String,
+    },
 }
 
 /// Login to a verified account.

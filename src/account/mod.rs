@@ -112,30 +112,61 @@ impl Account {
         }))
     }
 
-    /// Verify and make this account a verified user.
+    /// Verify this account based on the variant.
     pub fn verify(
         &mut self,
         verify_code: u32,
-        attributes: UserAttributes,
+        variant: AccountVerifyVariant,
     ) -> Result<(), AccountError> {
-        if let Self::Unverified(cxt) = &self {
-            if cxt.code != verify_code {
-                return Err(AccountError::VerificationCodeError);
+        match variant {
+            AccountVerifyVariant::Activiate(attributes) => {
+                if let Self::Unverified(cxt) = self {
+                    if cxt.code != verify_code {
+                        return Err(AccountError::VerificationCodeError);
+                    }
+                    *self = Self::Verified {
+                        id: {
+                            let mut hasher = DefaultHasher::new();
+                            attributes.email.hash(&mut hasher);
+                            hasher.finish()
+                        },
+                        attributes,
+                        tokens: verify::Tokens::new(),
+                        verify: UserVerifyVariant::None,
+                    };
+                    Ok(())
+                } else {
+                    Err(AccountError::UserRegisteredError)
+                }
             }
-            *self = Self::Verified {
-                id: {
-                    let mut hasher = DefaultHasher::new();
-                    attributes.email.hash(&mut hasher);
-                    hasher.finish()
-                },
-                attributes,
-                tokens: verify::Tokens::new(),
-                verify: UserVerifyVariant::None,
+            AccountVerifyVariant::ResetPassword(password) => {
+                if let Self::Verified {
+                    id,
+                    attributes,
+                    tokens,
+                    mut verify,
+                } = self
+                {
+                    match verify {
+                        UserVerifyVariant::None => Err(AccountError::PermissionDeniedError),
+                        UserVerifyVariant::ForgetPassword(cxt) => {
+                            if cxt.code != verify_code {
+                                return Err(AccountError::VerificationCodeError);
+                            }
+                            attributes.password_hash = {
+                                let mut hasher = DefaultHasher::new();
+                                password.hash(&mut hasher);
+                                hasher.finish()
+                            };
+                            verify = UserVerifyVariant::None;
+                            Ok(())
+                        }
+                    }
+                } else {
+                    Err(AccountError::UserUnverifiedError)
+                }
             }
-        } else {
-            return Err(AccountError::UserRegisteredError);
         }
-        Ok(())
     }
 
     /// Get the only id of this user.
@@ -245,6 +276,13 @@ impl Account {
     pub fn remove(&self) -> bool {
         fs::remove_file(format!("./data/accounts/{}.json", self.id())).is_ok()
     }
+}
+
+enum AccountVerifyVariant {
+    /// Activiate an unverified account.
+    Activiate(UserAttributes),
+    /// Reset a forgotten password.
+    ResetPassword(String),
 }
 
 #[derive(Deserialize, Serialize, Debug)]
