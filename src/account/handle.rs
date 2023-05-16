@@ -7,6 +7,7 @@ use super::UserVerifyVariant;
 use crate::account::verify;
 use crate::account::Permission;
 use crate::account::{Account, AccountManagerError};
+use crate::RequirePermissionContext;
 use async_std::sync::RwLock;
 use chrono::DateTime;
 use chrono::Duration;
@@ -202,19 +203,25 @@ struct AccountLoginDescriber {
 }
 
 /// Logout from an account.
-pub async fn logout_account(mut req: Request<()>) -> tide::Result {
+pub async fn logout_account(req: Request<()>) -> tide::Result {
     let account_manager = &super::INSTANCE;
-    let describer: AccountLogoutDescriber = req.body_json().await?;
-    match account_manager
-        .index()
-        .read()
-        .await
-        .get(&describer.context.user_id)
-    {
+    let cxt = match RequirePermissionContext::from_header(&req) {
+        Some(e) => e,
+        None => {
+            return Ok::<tide::Response, tide::Error>(
+                json!({
+                    "status": "error",
+                    "error": "Permission denied",
+                })
+                .into(),
+            )
+        }
+    };
+    match account_manager.index().read().await.get(&cxt.user_id) {
         Some(index) => {
             let b = account_manager.inner().read().await;
             let mut aw = b.get(*index).unwrap().write().await;
-            match aw.logout(describer.context.token) {
+            match aw.logout(cxt.token) {
                 Err(err) => {
                     return Ok::<tide::Response, tide::Error>(
                         json!({
@@ -248,26 +255,28 @@ pub async fn logout_account(mut req: Request<()>) -> tide::Result {
     }
 }
 
-#[derive(Deserialize)]
-struct AccountLogoutDescriber {
-    context: crate::RequirePermissionContext,
-}
-
 /// Sign in and remove an verified account.
 pub async fn sign_out_account(mut req: Request<()>) -> tide::Result {
     let account_manager = &super::INSTANCE;
+    let cxt = match RequirePermissionContext::from_header(&req) {
+        Some(e) => e,
+        None => {
+            return Ok::<tide::Response, tide::Error>(
+                json!({
+                    "status": "error",
+                    "error": "Permission denied",
+                })
+                .into(),
+            )
+        }
+    };
     let describer: AccountSignOutDescriber = req.body_json().await?;
     if match account_manager
         .inner()
         .read()
         .await
         .get(
-            match account_manager
-                .index()
-                .read()
-                .await
-                .get(&describer.context.user_id)
-            {
+            match account_manager.index().read().await.get(&cxt.user_id) {
                 Some(e) => *e,
                 _ => {
                     return Ok::<tide::Response, tide::Error>(
@@ -299,12 +308,11 @@ pub async fn sign_out_account(mut req: Request<()>) -> tide::Result {
         } => {
             let mut hasher = DefaultHasher::new();
             describer.password.hash(&mut hasher);
-            hasher.finish() == attributes.password_hash
-                && tokens.token_usable(describer.context.token)
+            hasher.finish() == attributes.password_hash && tokens.token_usable(cxt.token)
         }
     } {
-        account_manager.remove(describer.context.user_id).await;
-        info!("Account {} signed out", describer.context.user_id);
+        account_manager.remove(cxt.user_id).await;
+        info!("Account {} signed out", cxt.user_id);
         Ok::<tide::Response, tide::Error>(
             json!({
                 "status": "success",
@@ -324,16 +332,26 @@ pub async fn sign_out_account(mut req: Request<()>) -> tide::Result {
 
 #[derive(Deserialize)]
 struct AccountSignOutDescriber {
-    context: crate::RequirePermissionContext,
     /// For double-verifying.
     password: String,
 }
 
 /// Get a user's account details.
-pub async fn view_account(mut req: Request<()>) -> tide::Result {
+pub async fn view_account(req: Request<()>) -> tide::Result {
     let account_manager = &super::INSTANCE;
-    let describer: ViewAccountDescriber = req.body_json().await?;
-    match describer.context.valid(vec![]).await {
+    let context = match RequirePermissionContext::from_header(&req) {
+        Some(e) => e,
+        None => {
+            return Ok::<tide::Response, tide::Error>(
+                json!({
+                    "status": "error",
+                    "error": "Permission denied",
+                })
+                .into(),
+            )
+        }
+    };
+    match context.valid(vec![]).await {
         Ok(_) => {
             let b = account_manager.inner().read().await;
             let a = b
@@ -342,7 +360,7 @@ pub async fn view_account(mut req: Request<()>) -> tide::Result {
                         .index()
                         .read()
                         .await
-                        .get(&describer.context.user_id)
+                        .get(&context.user_id)
                         .unwrap(),
                 )
                 .unwrap()
@@ -376,11 +394,6 @@ pub async fn view_account(mut req: Request<()>) -> tide::Result {
     }
 }
 
-#[derive(Deserialize)]
-struct ViewAccountDescriber {
-    context: crate::RequirePermissionContext,
-}
-
 #[derive(Serialize)]
 struct ViewAccountResult {
     id: u64,
@@ -393,8 +406,20 @@ struct ViewAccountResult {
 /// Edit account metadata.
 pub async fn edit_account(mut req: Request<()>) -> tide::Result {
     let account_manager = &super::INSTANCE;
+    let context = match RequirePermissionContext::from_header(&req) {
+        Some(e) => e,
+        None => {
+            return Ok::<tide::Response, tide::Error>(
+                json!({
+                    "status": "error",
+                    "error": "Permission denied",
+                })
+                .into(),
+            )
+        }
+    };
     let describer: AccountEditDescriber = req.body_json().await?;
-    match describer.context.valid(vec![]).await {
+    match context.valid(vec![]).await {
         Ok(_) => {
             let b = account_manager.inner().read().await;
             let mut a = b
@@ -403,7 +428,7 @@ pub async fn edit_account(mut req: Request<()>) -> tide::Result {
                         .index()
                         .read()
                         .await
-                        .get(&describer.context.user_id)
+                        .get(&context.user_id)
                         .unwrap(),
                 )
                 .unwrap()
@@ -445,7 +470,6 @@ pub async fn edit_account(mut req: Request<()>) -> tide::Result {
 
 #[derive(Deserialize)]
 struct AccountEditDescriber {
-    context: crate::RequirePermissionContext,
     variants: Vec<AccountEditMetadataType>,
 }
 
@@ -603,12 +627,20 @@ pub mod manage {
     /// Let admin creating accounts.
     pub async fn make_account(mut req: Request<()>) -> tide::Result {
         let account_manager = &account::INSTANCE;
+        let context = match RequirePermissionContext::from_header(&req) {
+            Some(e) => e,
+            None => {
+                return Ok::<tide::Response, tide::Error>(
+                    json!({
+                        "status": "error",
+                        "error": "Permission denied",
+                    })
+                    .into(),
+                )
+            }
+        };
         let describer: MakeAccountDescriber = req.body_json().await?;
-        match describer
-            .context
-            .valid(vec![Permission::ManageAccounts])
-            .await
-        {
+        match context.valid(vec![Permission::ManageAccounts]).await {
             Ok(able) => {
                 if !able {
                     return Ok::<tide::Response, tide::Error>(
@@ -626,7 +658,7 @@ pub mod manage {
                             .index()
                             .read()
                             .await
-                            .get(&describer.context.user_id)
+                            .get(&context.user_id)
                             .unwrap(),
                     )
                     .unwrap()
@@ -708,7 +740,6 @@ pub mod manage {
 
     #[derive(Deserialize)]
     struct MakeAccountDescriber {
-        context: crate::RequirePermissionContext,
         email: lettre::Address,
         name: String,
         school_id: u32,
@@ -722,12 +753,20 @@ pub mod manage {
     /// View an account.
     pub async fn view_account(mut req: Request<()>) -> tide::Result {
         let account_manager = &account::INSTANCE;
+        let context = match RequirePermissionContext::from_header(&req) {
+            Some(e) => e,
+            None => {
+                return Ok::<tide::Response, tide::Error>(
+                    json!({
+                        "status": "error",
+                        "error": "Permission denied",
+                    })
+                    .into(),
+                )
+            }
+        };
         let describer: ViewAccountDescriber = req.body_json().await?;
-        match describer
-            .context
-            .valid(vec![Permission::ViewAccounts])
-            .await
-        {
+        match context.valid(vec![Permission::ViewAccounts]).await {
             Ok(able) => {
                 if !able {
                     return Ok::<tide::Response, tide::Error>(
@@ -761,7 +800,7 @@ pub mod manage {
                         },
                         Account::Verified { attributes, .. } => {
                             let permissions = account.permissions();
-                            if !describer.context.valid(permissions.clone()).await.unwrap() {}
+                            if !context.valid(permissions.clone()).await.unwrap() {}
                             ViewAccountResult::Ok(super::ViewAccountResult {
                                 id: *aid,
                                 metadata: account.metadata().unwrap(),
@@ -792,7 +831,6 @@ pub mod manage {
 
     #[derive(Deserialize)]
     struct ViewAccountDescriber {
-        context: crate::RequirePermissionContext,
         accounts: Vec<u64>,
     }
 
@@ -805,12 +843,20 @@ pub mod manage {
     /// Modify an account from admin side.
     pub async fn modify_account(mut req: Request<()>) -> tide::Result {
         let account_manager = &account::INSTANCE;
+        let context = match RequirePermissionContext::from_header(&req) {
+            Some(e) => e,
+            None => {
+                return Ok::<tide::Response, tide::Error>(
+                    json!({
+                        "status": "error",
+                        "error": "Permission denied",
+                    })
+                    .into(),
+                )
+            }
+        };
         let describer: AccountModifyDescriber = req.body_json().await?;
-        match describer
-            .context
-            .valid(vec![Permission::ManageAccounts])
-            .await
-        {
+        match context.valid(vec![Permission::ManageAccounts]).await {
             Ok(able) => {
                 if !able {
                     return Ok::<tide::Response, tide::Error>(
@@ -845,12 +891,7 @@ pub mod manage {
                     .unwrap()
                     .write()
                     .await;
-                if !describer
-                    .context
-                    .valid(a.permissions())
-                    .await
-                    .unwrap_or_default()
-                {
+                if !context.valid(a.permissions()).await.unwrap_or_default() {
                     return Ok::<tide::Response, tide::Error>(
                         json!({
                             "status": "error",
@@ -860,7 +901,7 @@ pub mod manage {
                     );
                 }
                 for variant in describer.variants {
-                    match variant.apply(a.deref_mut(), &describer.context).await {
+                    match variant.apply(a.deref_mut(), &context).await {
                         Ok(_) => continue,
                         Err(err) => {
                             return Ok::<tide::Response, tide::Error>(
@@ -895,7 +936,6 @@ pub mod manage {
 
     #[derive(Deserialize)]
     struct AccountModifyDescriber {
-        context: crate::RequirePermissionContext,
         account_id: u64,
         variants: Vec<AccountModifyType>,
     }

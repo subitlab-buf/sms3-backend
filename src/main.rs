@@ -2,8 +2,8 @@ mod account;
 pub mod config;
 
 use account::{AccountManagerError, Permissions};
-use serde::Deserialize;
 use std::ops::Deref;
+use tide::Request;
 
 #[async_std::main]
 async fn main() -> tide::Result<()> {
@@ -42,7 +42,6 @@ async fn main() -> tide::Result<()> {
 }
 
 /// A context for checking the validation of action an account performs with permission requirements.
-#[derive(Deserialize)]
 pub struct RequirePermissionContext {
     /// The access token of this account.
     pub token: u64,
@@ -77,5 +76,24 @@ impl RequirePermissionContext {
             }
             None => Err(AccountManagerError::AccountNotFound(self.user_id)),
         }
+    }
+
+    pub fn from_header(request: &Request<()>) -> Option<Self> {
+        Some(Self {
+            token: match request.header("Token") {
+                Some(e) => match e.as_str().parse() {
+                    Ok(n) => n,
+                    Err(_) => return None,
+                },
+                None => return None,
+            },
+            user_id: match request.header("AccountId") {
+                Some(e) => match e.as_str().parse() {
+                    Ok(n) => n,
+                    Err(_) => return None,
+                },
+                None => return None,
+            },
+        })
     }
 }
