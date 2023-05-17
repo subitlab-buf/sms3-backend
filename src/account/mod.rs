@@ -6,6 +6,7 @@ use chrono::{DateTime, Duration, Utc};
 use once_cell::sync::Lazy;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
+use sha256::digest;
 use std::{
     collections::{hash_map::DefaultHasher, HashMap},
     fmt::Display,
@@ -150,11 +151,7 @@ impl Account {
                             if cxt.code != verify_code {
                                 return Err(AccountError::VerificationCodeError);
                             }
-                            attributes.password_hash = {
-                                let mut hasher = DefaultHasher::new();
-                                password.hash(&mut hasher);
-                                hasher.finish()
-                            };
+                            attributes.password_sha = digest(password);
                             *verify = UserVerifyVariant::None;
                             Ok(())
                         }
@@ -216,7 +213,7 @@ impl Account {
     }
 
     /// Login into the account and return back a token in a `Result`.
-    pub fn login(&mut self, password: &str) -> Result<u64, AccountError> {
+    pub fn login(&mut self, password: &str) -> Result<String, AccountError> {
         match self {
             Account::Unverified(_) => Err(AccountError::UserUnverifiedError),
             Account::Verified {
@@ -225,11 +222,7 @@ impl Account {
                 tokens,
                 ..
             } => {
-                if {
-                    let mut hasher = DefaultHasher::new();
-                    password.hash(&mut hasher);
-                    hasher.finish() == attributes.password_hash
-                } {
+                if digest(password) == attributes.password_sha {
                     Ok(tokens.new_token(*id, attributes.token_expiration_time))
                 } else {
                     Err(AccountError::PasswordIncorrectError)
@@ -239,7 +232,7 @@ impl Account {
     }
 
     /// Logout this account with the target token.
-    pub fn logout(&mut self, token: u64) -> Result<(), AccountError> {
+    pub fn logout(&mut self, token: &str) -> Result<(), AccountError> {
         match self {
             Account::Unverified(_) => Err(AccountError::UserUnverifiedError),
             Account::Verified { tokens, .. } => {
@@ -321,7 +314,7 @@ pub struct UserAttributes {
     /// The registration ip of this user.
     registration_ip: Option<String>,
     /// Hash of this user's password.
-    password_hash: u64,
+    password_sha: String,
     /// The expiration time of a token in days.
     /// `0` means never expire.
     token_expiration_time: u16,

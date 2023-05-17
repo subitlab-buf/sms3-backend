@@ -8,6 +8,7 @@ use lettre::{
 };
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
+use sha256::digest;
 use std::{
     collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
@@ -51,7 +52,7 @@ impl Context {
 /// A simple token manager.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Tokens {
-    inner: Vec<(Option<NaiveDateTime>, u64)>,
+    inner: Vec<(Option<NaiveDateTime>, String)>,
 }
 
 impl Tokens {
@@ -67,7 +68,7 @@ impl Tokens {
         // The user id.
         id: u64,
         expire_time: u16,
-    ) -> u64 {
+    ) -> String {
         let now = if expire_time == 0 {
             None
         } else {
@@ -78,21 +79,24 @@ impl Tokens {
                     .unwrap_or_default(),
             )
         };
-        let token: u64 = {
-            let mut hasher = DefaultHasher::new();
-            id.hash(&mut hasher);
-            now.hash(&mut hasher);
-            hasher.finish()
-        };
+        let token = digest(
+            &{
+                let mut hasher = DefaultHasher::new();
+                id.hash(&mut hasher);
+                now.hash(&mut hasher);
+                hasher.finish()
+            }
+            .to_be_bytes(),
+        );
         if self.inner.capacity() == self.inner.len() + 1 {
             self.inner.remove(self.inner.len());
         }
-        self.inner.push((now, token));
+        self.inner.push((now, token.clone()));
         token
     }
 
     /// Remove a target token and return whether the token was be removed successfully.
-    pub(super) fn remove(&mut self, token: u64) -> bool {
+    pub(super) fn remove(&mut self, token: &str) -> bool {
         let l = self.inner.len();
         self.inner = self
             .inner
@@ -104,7 +108,7 @@ impl Tokens {
     }
 
     /// Check if a token is usable.
-    pub fn token_usable(&self, token: u64) -> bool {
+    pub fn token_usable(&self, token: &str) -> bool {
         self.inner.iter().any(|e| e.1 == token)
     }
 

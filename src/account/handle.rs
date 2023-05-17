@@ -14,8 +14,7 @@ use chrono::Duration;
 use chrono::Utc;
 use rand::Rng;
 use serde::Deserialize;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
+use sha256::digest;
 use std::ops::Deref;
 use std::ops::DerefMut;
 use tide::log::error;
@@ -119,11 +118,7 @@ pub async fn verify_account(mut req: Request<()>) -> tide::Result {
                             permissions: vec![Permission::View, Permission::Post],
                             registration_time: Utc::now(),
                             registration_ip: req.remote().map(|s| s.to_string()),
-                            password_hash: {
-                                let mut hasher = DefaultHasher::new();
-                                password.hash(&mut hasher);
-                                hasher.finish()
-                            },
+                            password_sha: digest(password as &str),
                             token_expiration_time: 5,
                         }),
                     ) {
@@ -203,6 +198,7 @@ struct AccountVerifyDescriber {
 
 #[derive(Deserialize)]
 enum AccountVerifyVariant {
+    /// Activiate an unverified account.
     Activiate {
         email: lettre::Address,
         name: String,
@@ -212,6 +208,7 @@ enum AccountVerifyVariant {
         organization: Option<String>,
         password: String,
     },
+    /// Verify a resetpassword session.
     ResetPassword {
         email: lettre::Address,
         password: String,
@@ -281,7 +278,7 @@ pub async fn logout_account(req: Request<()>) -> tide::Result {
         Some(index) => {
             let b = account_manager.inner().read().await;
             let mut aw = b.get(*index).unwrap().write().await;
-            match aw.logout(cxt.token) {
+            match aw.logout(&cxt.token) {
                 Err(err) => {
                     return Ok::<tide::Response, tide::Error>(
                         json!({
@@ -366,9 +363,8 @@ pub async fn sign_out_account(mut req: Request<()>) -> tide::Result {
         Account::Verified {
             attributes, tokens, ..
         } => {
-            let mut hasher = DefaultHasher::new();
-            describer.password.hash(&mut hasher);
-            hasher.finish() == attributes.password_hash && tokens.token_usable(cxt.token)
+            digest(describer.password) == attributes.password_sha
+                && tokens.token_usable(&cxt.token)
         }
     } {
         account_manager.remove(cxt.user_id).await;
@@ -555,16 +551,8 @@ impl AccountEditMetadataType {
                 AccountEditMetadataType::House(house) => attributes.house = house,
                 AccountEditMetadataType::Organization(org) => attributes.organization = org,
                 AccountEditMetadataType::Password { old, new } => {
-                    if attributes.password_hash == {
-                        let mut hasher = DefaultHasher::new();
-                        old.hash(&mut hasher);
-                        hasher.finish()
-                    } {
-                        attributes.password_hash = {
-                            let mut hasher = DefaultHasher::new();
-                            new.hash(&mut hasher);
-                            hasher.finish()
-                        }
+                    if attributes.password_sha == digest(old) {
+                        attributes.password_sha = digest(new)
                     } else {
                         return Err(AccountError::PasswordIncorrectError);
                     }
@@ -677,6 +665,7 @@ pub mod manage {
     use async_std::sync::RwLock;
     use chrono::Utc;
     use serde::Deserialize;
+    use sha256::digest;
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
     use std::ops::{Deref, DerefMut};
@@ -746,11 +735,7 @@ pub mod manage {
                             .collect(),
                         registration_time: Utc::now(),
                         registration_ip: req.remote().map(|e| e.to_string()),
-                        password_hash: {
-                            let mut hasher = DefaultHasher::new();
-                            describer.password.hash(&mut hasher);
-                            hasher.finish()
-                        },
+                        password_sha: digest(describer.password),
                         token_expiration_time: 5,
                     },
                     tokens: Tokens::new(),
