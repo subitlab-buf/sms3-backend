@@ -147,7 +147,43 @@ pub async fn verify_account(mut req: Request<()>) -> tide::Result {
                     );
                 }
             }
-            AccountVerifyVariant::ResetPassword { email, password } => todo!(),
+            AccountVerifyVariant::ResetPassword { email, password } => {
+                if {
+                    let a = account.read().await;
+                    if a.email() == email {
+                        let id = a.id();
+                        drop(a);
+                        account_manager.refresh(id).await;
+                        true
+                    } else {
+                        false
+                    }
+                } {
+                    let mut a = account.write().await;
+                    if let Err(err) = a.verify(
+                        describer.code,
+                        super::AccountVerifyVariant::ResetPassword(password.to_string()),
+                    ) {
+                        return Ok::<tide::Response, tide::Error>(
+                            json!({
+                                "status": "error",
+                                "error": AccountManagerError::Account(a.id(), err).to_string(),
+                            })
+                            .into(),
+                        );
+                    }
+                    if !a.save() {
+                        error!("Error when saving account {}", a.email());
+                    }
+                    info!("Password reseted: {} (id: {})", a.email(), a.id());
+                    return Ok::<tide::Response, tide::Error>(
+                        json!({
+                            "status": "success",
+                        })
+                        .into(),
+                    );
+                }
+            }
         }
     }
     Ok::<tide::Response, tide::Error>(

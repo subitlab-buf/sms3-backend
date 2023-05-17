@@ -113,7 +113,7 @@ impl Account {
     }
 
     /// Verify this account based on the variant.
-    pub fn verify(
+    fn verify(
         &mut self,
         verify_code: u32,
         variant: AccountVerifyVariant,
@@ -141,10 +141,7 @@ impl Account {
             }
             AccountVerifyVariant::ResetPassword(password) => {
                 if let Self::Verified {
-                    id,
-                    attributes,
-                    tokens,
-                    mut verify,
+                    attributes, verify, ..
                 } = self
                 {
                     match verify {
@@ -158,7 +155,7 @@ impl Account {
                                 password.hash(&mut hasher);
                                 hasher.finish()
                             };
-                            verify = UserVerifyVariant::None;
+                            *verify = UserVerifyVariant::None;
                             Ok(())
                         }
                     }
