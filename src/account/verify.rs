@@ -9,10 +9,6 @@ use lettre::{
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use sha256::digest;
-use std::{
-    collections::hash_map::DefaultHasher,
-    hash::{Hash, Hasher},
-};
 use tide::log::info;
 
 pub(super) static SENDER_INSTANCE: Lazy<VerificationSender> =
@@ -79,15 +75,7 @@ impl Tokens {
                     .unwrap_or_default(),
             )
         };
-        let token = digest(
-            &{
-                let mut hasher = DefaultHasher::new();
-                id.hash(&mut hasher);
-                now.hash(&mut hasher);
-                hasher.finish()
-            }
-            .to_be_bytes(),
-        );
+        let token = digest(format!("{}-{:?}", id, now));
         if self.inner.capacity() == self.inner.len() + 1 {
             self.inner.remove(self.inner.len());
         }

@@ -38,6 +38,10 @@ async fn main() -> tide::Result<()> {
     app.at("/api/account/manage/modify")
         .post(account::handle::manage::modify_account);
 
+    // Posting
+    app.at("/api/post/image/upload")
+        .post(post::handle::cache_image);
+
     app.listen("127.0.0.1:8080").await?;
     Ok(())
 }
