@@ -17,7 +17,7 @@ pub static INSTANCE: Lazy<CacheManager> = Lazy::new(|| CacheManager::new());
 
 #[derive(Serialize, Deserialize)]
 pub struct PostImageCache {
-    hash: u64,
+    pub(super) hash: u64,
     uploader: u64,
     /// Indicates if this cache is blocked by a post.
     blocked: AtomicBool,
@@ -78,7 +78,7 @@ impl PostImageCache {
 }
 
 pub struct CacheManager {
-    caches: RwLock<Vec<PostImageCache>>,
+    pub(super) caches: RwLock<Vec<PostImageCache>>,
 }
 
 impl CacheManager {

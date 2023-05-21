@@ -39,8 +39,9 @@ async fn main() -> tide::Result<()> {
         .post(account::handle::manage::modify_account);
 
     // Posting
-    app.at("/api/post/image/upload")
+    app.at("/api/post/upload_image")
         .post(post::handle::cache_image);
+    app.at("/api/post/create").post(post::handle::post);
 
     app.listen("127.0.0.1:8080").await?;
     Ok(())

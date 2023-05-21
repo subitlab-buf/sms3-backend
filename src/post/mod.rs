@@ -131,4 +131,14 @@ impl PostManager {
     pub async fn push(&self, post: Post) {
         self.posts.write().await.push(RwLock::new(post))
     }
+
+    /// Indicates if the target id is already contained in this instance.
+    pub async fn contains_id(&self, id: u64) -> bool {
+        for post in self.posts.read().await.iter() {
+            if post.read().await.id == id {
+                return true;
+            }
+        }
+        false
+    }
 }
