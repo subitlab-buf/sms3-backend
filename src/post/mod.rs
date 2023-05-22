@@ -81,7 +81,7 @@ struct PostAcceptationData {
 }
 
 /// Describes status of a post.
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub enum PostAcceptationStatus {
     Accepted(String),
     Pending,

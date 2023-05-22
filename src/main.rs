@@ -27,7 +27,7 @@ async fn main() -> tide::Result<()> {
         .get(account::handle::view_account);
     app.at("/api/account/edit")
         .post(account::handle::edit_account);
-    app.at("/api/account/resetpassword")
+    app.at("/api/account/reset-password")
         .post(account::handle::reset_password);
 
     // Account managing
@@ -39,11 +39,13 @@ async fn main() -> tide::Result<()> {
         .post(account::handle::manage::modify_account);
 
     // Posting
-    app.at("/api/post/upload_image")
+    app.at("/api/post/upload-image")
         .post(post::handle::cache_image);
     app.at("/api/post/create").post(post::handle::post);
-    app.at("/api/post/getself")
+    app.at("/api/post/get-self")
         .get(post::handle::view_self_post);
+    app.at("/api/post/request-review")
+        .post(post::handle::request_review);
 
     app.listen("127.0.0.1:8080").await?;
     Ok(())

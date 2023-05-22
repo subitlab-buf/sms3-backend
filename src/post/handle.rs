@@ -1,4 +1,5 @@
 use super::Post;
+use super::PostAcceptationStatus;
 use crate::account::Permission;
 use crate::post::cache::PostImageCache;
 use crate::RequirePermissionContext;
@@ -193,7 +194,7 @@ pub async fn view_self_post(req: Request<()>) -> tide::Result {
             )
         }
     };
-    match cxt.valid(vec![Permission::Post]).await {
+    match cxt.valid(vec![]).await {
         Ok(able) => {
             if able {
                 let mut posts = Vec::new();
@@ -207,6 +208,84 @@ pub async fn view_self_post(req: Request<()>) -> tide::Result {
                     json!({
                         "status": "success",
                         "posts": posts,
+                    })
+                    .into(),
+                )
+            } else {
+                Ok::<tide::Response, tide::Error>(
+                    json!({
+                        "status": "error",
+                        "error": "Permission denied",
+                    })
+                    .into(),
+                )
+            }
+        }
+        Err(err) => Ok::<tide::Response, tide::Error>(
+            json!({
+                "status": "error",
+                "error": err.to_string(),
+            })
+            .into(),
+        ),
+    }
+}
+
+/// Request a review to admins.
+pub async fn request_review(mut req: Request<()>) -> tide::Result {
+    let cxt = match RequirePermissionContext::from_header(&req) {
+        Some(e) => e,
+        None => {
+            return Ok::<tide::Response, tide::Error>(
+                json!({
+                    "status": "error",
+                    "error": "Permission denied",
+                })
+                .into(),
+            )
+        }
+    };
+    let describer: RequestReviewDescriber = req.body_json().await?;
+    match cxt.valid(vec![Permission::Post]).await {
+        Ok(able) => {
+            if able {
+                for p in super::INSTANCE.posts.read().await.iter() {
+                    let pr = p.read().await;
+                    if pr.id == describer.post {
+                        if pr.requester != cxt.user_id
+                            || pr
+                                .status
+                                .back()
+                                .map(|e| e.status == PostAcceptationStatus::Pending)
+                                .unwrap_or_default()
+                        {
+                            return Ok::<tide::Response, tide::Error>(
+                                json!({
+                                    "status": "error",
+                                    "error": "Permission denied",
+                                })
+                                .into(),
+                            );
+                        }
+                        drop(pr);
+                        let mut pw = p.write().await;
+                        pw.status.push_back(super::PostAcceptationData {
+                            operator: cxt.user_id,
+                            status: PostAcceptationStatus::Pending,
+                            time: Utc::now(),
+                        });
+                        return Ok::<tide::Response, tide::Error>(
+                            json!({
+                                "status": "success",
+                            })
+                            .into(),
+                        );
+                    }
+                }
+                Ok::<tide::Response, tide::Error>(
+                    json!({
+                        "status": "error",
+                        "error": "Target post not found",
                     })
                     .into(),
                 )
