@@ -40,8 +40,9 @@ pub struct Post {
     images: Vec<u64>,
     metadata: PostMetadata,
     /// The requester of this post in user id.
-    requester: u64,
-    /// The status of this post (including history statuses).
+    publisher: u64,
+    /// The status of this post (including history status inside a deque).
+    /// Newer status will be pushed to back of the deque.
     status: VecDeque<PostAcceptationData>,
 }
 
@@ -62,7 +63,7 @@ impl Post {
         }
     }
 
-    #[must_use = "The save result should be handled"]
+    #[must_use = "The deletion result should be handled"]
     pub fn remove(&self) -> bool {
         fs::remove_file(format!("./data/posts/{}.toml", self.id)).is_ok()
     }
@@ -71,6 +72,7 @@ impl Post {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct PostMetadata {
     title: String,
+    /// Description of this post, should be secret to users except admins and publisher.
     description: String,
     /// Time range to display of this post.
     time_range: (NaiveDate, NaiveDate),
@@ -78,19 +80,25 @@ struct PostMetadata {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct PostAcceptationData {
-    /// Permitter of the acceptation, stored with account id.
+    /// Operator of the acceptation, stored with account id.
     operator: u64,
     status: PostAcceptationStatus,
-    /// Permit time.
+    /// Operate time.
     time: DateTime<Utc>,
 }
 
 /// Describes status of a post.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub enum PostAcceptationStatus {
+    /// The post was accepted with a message.
     Accepted(String),
+    /// The post is pending to be submitted,
+    /// admins are not able to accept it.
     Pending,
+    /// The post was rejected by an admin with a message.
     Rejected(String),
+    /// The post was submitted with a message for admins by publisher.
+    Submitted(String),
 }
 
 impl Default for PostAcceptationStatus {

@@ -10,6 +10,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::collections::VecDeque;
 use std::hash::Hash;
 use std::hash::Hasher;
+use std::sync::atomic;
 use tide::log::error;
 use tide::prelude::*;
 use tide::Request;
@@ -107,6 +108,14 @@ pub async fn new_post(mut req: Request<()>) -> tide::Result {
                         );
                     }
                 }
+                for img_id in descriptor.images.iter() {
+                    cache
+                        .iter()
+                        .find(|e| e.hash == *img_id)
+                        .unwrap()
+                        .blocked
+                        .store(true, atomic::Ordering::Relaxed)
+                }
                 let post = Post {
                     id: {
                         let mut hasher = DefaultHasher::new();
@@ -156,7 +165,7 @@ pub async fn new_post(mut req: Request<()>) -> tide::Result {
                             descriptor.time_range
                         },
                     },
-                    requester: cxt.user_id,
+                    publisher: cxt.user_id,
                 };
                 if !post.save() {
                     error!("Error while saving post {}", post.id);
@@ -217,7 +226,7 @@ pub async fn view_self_post(req: Request<()>) -> tide::Result {
                 let mut posts = Vec::new();
                 for p in super::INSTANCE.posts.read().await.iter() {
                     let pr = p.read().await;
-                    if pr.requester == cxt.user_id {
+                    if pr.publisher == cxt.user_id {
                         posts.push(pr.clone());
                     }
                 }
@@ -248,7 +257,8 @@ pub async fn view_self_post(req: Request<()>) -> tide::Result {
     }
 }
 
-/// Request a review to admins.
+/// Request a review to admins
+/// by adding `Submitted` to the target status deque.
 pub async fn request_review(mut req: Request<()>) -> tide::Result {
     let cxt = match RequirePermissionContext::from_header(&req) {
         Some(e) => e,
@@ -269,11 +279,11 @@ pub async fn request_review(mut req: Request<()>) -> tide::Result {
                 for p in super::INSTANCE.posts.read().await.iter() {
                     let pr = p.read().await;
                     if pr.id == descriptor.post {
-                        if pr.requester != cxt.user_id
+                        if pr.publisher != cxt.user_id
                             || pr
                                 .status
                                 .back()
-                                .map(|e| e.status == PostAcceptationStatus::Pending)
+                                .map(|e| matches!(e.status, PostAcceptationStatus::Submitted(_)))
                                 .unwrap_or_default()
                         {
                             return Ok::<tide::Response, tide::Error>(
@@ -288,7 +298,9 @@ pub async fn request_review(mut req: Request<()>) -> tide::Result {
                         let mut pw = p.write().await;
                         pw.status.push_back(super::PostAcceptationData {
                             operator: cxt.user_id,
-                            status: PostAcceptationStatus::Pending,
+                            status: PostAcceptationStatus::Submitted(
+                                descriptor.message.unwrap_or_default(),
+                            ),
                             time: Utc::now(),
                         });
                         return Ok::<tide::Response, tide::Error>(
@@ -328,6 +340,26 @@ pub async fn request_review(mut req: Request<()>) -> tide::Result {
 
 #[derive(Serialize, Deserialize)]
 struct RequestReviewDescriptor {
-    /// The post id.
     post: u64,
+    /// The message for admins.
+    message: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct EditPostDescriptor {
+    post: u64,
+    variants: Vec<EditPostVariant>,
+}
+
+#[derive(Serialize, Deserialize)]
+enum EditPostVariant {
+    Title(String),
+    Description(String),
+    Images(Vec<u64>),
+    TimeRange(NaiveDate, NaiveDate),
+    /// Change status of the post to `Pending`
+    /// if the target status is `Submitted`.
+    CancelSubmittion,
+    /// Remove the post and unblock all the images it use.
+    Destroy,
 }

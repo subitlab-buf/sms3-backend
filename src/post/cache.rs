@@ -20,7 +20,7 @@ pub struct PostImageCache {
     pub(super) hash: u64,
     uploader: u64,
     /// Indicates if this cache is blocked by a post.
-    blocked: AtomicBool,
+    pub(super) blocked: AtomicBool,
 
     /// The image cache of this cache, only used for pushing into a manager instance.
     #[serde(skip)]
