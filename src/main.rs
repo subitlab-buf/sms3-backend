@@ -41,7 +41,7 @@ async fn main() -> tide::Result<()> {
     // Posting
     app.at("/api/post/upload-image")
         .post(post::handle::cache_image);
-    app.at("/api/post/create").post(post::handle::post);
+    app.at("/api/post/create").post(post::handle::new_post);
     app.at("/api/post/get-self")
         .get(post::handle::view_self_post);
     app.at("/api/post/request-review")

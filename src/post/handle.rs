@@ -3,6 +3,7 @@ use super::PostAcceptationStatus;
 use crate::account::Permission;
 use crate::post::cache::PostImageCache;
 use crate::RequirePermissionContext;
+use chrono::Days;
 use chrono::NaiveDate;
 use chrono::Utc;
 use std::collections::hash_map::DefaultHasher;
@@ -77,7 +78,7 @@ pub async fn cache_image(mut req: Request<()>) -> tide::Result {
     }
 }
 
-pub async fn post(mut req: Request<()>) -> tide::Result {
+pub async fn new_post(mut req: Request<()>) -> tide::Result {
     let cxt = match RequirePermissionContext::from_header(&req) {
         Some(e) => e,
         None => {
@@ -90,12 +91,12 @@ pub async fn post(mut req: Request<()>) -> tide::Result {
             )
         }
     };
-    let describer: PostDescriber = req.body_json().await?;
+    let descriptor: PostDescriptor = req.body_json().await?;
     match cxt.valid(vec![Permission::Post]).await {
         Ok(able) => {
             if able {
                 let cache = super::cache::INSTANCE.caches.read().await;
-                for img_id in describer.images.iter() {
+                for img_id in descriptor.images.iter() {
                     if !cache.iter().any(|e| e.hash == *img_id) {
                         return Ok::<tide::Response, tide::Error>(
                             json!({
@@ -109,9 +110,9 @@ pub async fn post(mut req: Request<()>) -> tide::Result {
                 let post = Post {
                     id: {
                         let mut hasher = DefaultHasher::new();
-                        describer.title.hash(&mut hasher);
-                        describer.description.hash(&mut hasher);
-                        describer.images.hash(&mut hasher);
+                        descriptor.title.hash(&mut hasher);
+                        descriptor.description.hash(&mut hasher);
+                        descriptor.images.hash(&mut hasher);
                         let id = hasher.finish();
                         if super::INSTANCE.contains_id(id).await {
                             return Ok::<tide::Response, tide::Error>(
@@ -124,7 +125,7 @@ pub async fn post(mut req: Request<()>) -> tide::Result {
                         }
                         id
                     },
-                    images: describer.images,
+                    images: descriptor.images,
                     status: {
                         let mut deque = VecDeque::new();
                         deque.push_back(super::PostAcceptationData {
@@ -135,9 +136,25 @@ pub async fn post(mut req: Request<()>) -> tide::Result {
                         deque
                     },
                     metadata: super::PostMetadata {
-                        title: describer.title,
-                        description: describer.description,
-                        time_range: describer.time_range,
+                        title: descriptor.title,
+                        description: descriptor.description,
+                        time_range: {
+                            if descriptor
+                                .time_range
+                                .0
+                                .checked_add_days(Days::new(7))
+                                .map_or(false, |e| e > descriptor.time_range.1)
+                            {
+                                return Ok::<tide::Response, tide::Error>(
+                                    json!({
+                                        "status": "error",
+                                        "error": "Post time out of range",
+                                    })
+                                    .into(),
+                                );
+                            }
+                            descriptor.time_range
+                        },
                     },
                     requester: cxt.user_id,
                 };
@@ -174,7 +191,7 @@ pub async fn post(mut req: Request<()>) -> tide::Result {
 }
 
 #[derive(Serialize, Deserialize)]
-struct PostDescriber {
+struct PostDescriptor {
     title: String,
     description: String,
     time_range: (NaiveDate, NaiveDate),
@@ -245,13 +262,13 @@ pub async fn request_review(mut req: Request<()>) -> tide::Result {
             )
         }
     };
-    let describer: RequestReviewDescriber = req.body_json().await?;
+    let descriptor: RequestReviewDescriptor = req.body_json().await?;
     match cxt.valid(vec![Permission::Post]).await {
         Ok(able) => {
             if able {
                 for p in super::INSTANCE.posts.read().await.iter() {
                     let pr = p.read().await;
-                    if pr.id == describer.post {
+                    if pr.id == descriptor.post {
                         if pr.requester != cxt.user_id
                             || pr
                                 .status
@@ -310,7 +327,7 @@ pub async fn request_review(mut req: Request<()>) -> tide::Result {
 }
 
 #[derive(Serialize, Deserialize)]
-struct RequestReviewDescriber {
+struct RequestReviewDescriptor {
     /// The post id.
     post: u64,
 }

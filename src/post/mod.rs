@@ -61,6 +61,11 @@ impl Post {
             Err(_) => false,
         }
     }
+
+    #[must_use = "The save result should be handled"]
+    pub fn remove(&self) -> bool {
+        fs::remove_file(format!("./data/posts/{}.toml", self.id)).is_ok()
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

@@ -25,9 +25,9 @@ use tide::Request;
 /// Create an unverified account.
 pub async fn create_account(mut req: Request<()>) -> tide::Result {
     let account_manager = &super::INSTANCE;
-    let describer: AccountCreateDescriber = req.body_json().await?;
+    let descriptor: AccountCreateDescriptor = req.body_json().await?;
     for account in account_manager.inner().read().await.iter() {
-        if account.read().await.email() == &describer.email {
+        if account.read().await.email() == &descriptor.email {
             return Ok::<tide::Response, tide::Error>(
                 json!({
                     "status": "error",
@@ -39,7 +39,7 @@ pub async fn create_account(mut req: Request<()>) -> tide::Result {
     }
     let len = account_manager.inner().read().await.len();
     account_manager.inner().write().await.push(RwLock::new({
-        let account = match Account::new(describer.email).await {
+        let account = match Account::new(descriptor.email).await {
             Ok(e) => e,
             Err(err) => {
                 return Ok::<tide::Response, tide::Error>(
@@ -75,16 +75,16 @@ pub async fn create_account(mut req: Request<()>) -> tide::Result {
 }
 
 #[derive(Deserialize)]
-struct AccountCreateDescriber {
+struct AccountCreateDescriptor {
     email: lettre::Address,
 }
 
 /// Verify an account.
 pub async fn verify_account(mut req: Request<()>) -> tide::Result {
     let account_manager = &super::INSTANCE;
-    let describer: AccountVerifyDescriber = req.body_json().await?;
+    let descriptor: AccountVerifyDescriptor = req.body_json().await?;
     for account in account_manager.inner().read().await.iter() {
-        match &describer.variant {
+        match &descriptor.variant {
             AccountVerifyVariant::Activiate {
                 email,
                 name,
@@ -107,7 +107,7 @@ pub async fn verify_account(mut req: Request<()>) -> tide::Result {
                 } {
                     let mut a = account.write().await;
                     if let Err(err) = a.verify(
-                        describer.code,
+                        descriptor.code,
                         super::AccountVerifyVariant::Activiate(UserAttributes {
                             email: email.clone(),
                             name: name.clone(),
@@ -156,7 +156,7 @@ pub async fn verify_account(mut req: Request<()>) -> tide::Result {
                 } {
                     let mut a = account.write().await;
                     if let Err(err) = a.verify(
-                        describer.code,
+                        descriptor.code,
                         super::AccountVerifyVariant::ResetPassword(password.to_string()),
                     ) {
                         return Ok::<tide::Response, tide::Error>(
@@ -191,7 +191,7 @@ pub async fn verify_account(mut req: Request<()>) -> tide::Result {
 }
 
 #[derive(Deserialize)]
-struct AccountVerifyDescriber {
+struct AccountVerifyDescriptor {
     code: u32,
     variant: AccountVerifyVariant,
 }
@@ -218,11 +218,11 @@ enum AccountVerifyVariant {
 /// Login to a verified account.
 pub async fn login_account(mut req: Request<()>) -> tide::Result {
     let account_manager = &super::INSTANCE;
-    let describer: AccountLoginDescriber = req.body_json().await?;
+    let descriptor: AccountLoginDescriptor = req.body_json().await?;
     for account in account_manager.inner().read().await.iter() {
-        if account.read().await.email() == &describer.email {
+        if account.read().await.email() == &descriptor.email {
             let mut aw = account.write().await;
-            let token = aw.login(&describer.password);
+            let token = aw.login(&descriptor.password);
             if !aw.save() {
                 error!("Error when saving account {}", aw.email());
             }
@@ -254,7 +254,7 @@ pub async fn login_account(mut req: Request<()>) -> tide::Result {
 }
 
 #[derive(Deserialize)]
-struct AccountLoginDescriber {
+struct AccountLoginDescriptor {
     email: lettre::Address,
     password: String,
 }
@@ -327,7 +327,7 @@ pub async fn sign_out_account(mut req: Request<()>) -> tide::Result {
             )
         }
     };
-    let describer: AccountSignOutDescriber = req.body_json().await?;
+    let descriptor: AccountSignOutDescriptor = req.body_json().await?;
     if match account_manager
         .inner()
         .read()
@@ -363,7 +363,7 @@ pub async fn sign_out_account(mut req: Request<()>) -> tide::Result {
         Account::Verified {
             attributes, tokens, ..
         } => {
-            digest(describer.password) == attributes.password_sha
+            digest(descriptor.password) == attributes.password_sha
                 && tokens.token_usable(&cxt.token)
         }
     } {
@@ -387,7 +387,7 @@ pub async fn sign_out_account(mut req: Request<()>) -> tide::Result {
 }
 
 #[derive(Deserialize)]
-struct AccountSignOutDescriber {
+struct AccountSignOutDescriptor {
     /// For double-verifying.
     password: String,
 }
@@ -474,7 +474,7 @@ pub async fn edit_account(mut req: Request<()>) -> tide::Result {
             )
         }
     };
-    let describer: AccountEditDescriber = req.body_json().await?;
+    let descriptor: AccountEditDescriptor = req.body_json().await?;
     match context.valid(vec![]).await {
         Ok(_) => {
             let b = account_manager.inner().read().await;
@@ -490,7 +490,7 @@ pub async fn edit_account(mut req: Request<()>) -> tide::Result {
                 .unwrap()
                 .write()
                 .await;
-            for variant in describer.variants {
+            for variant in descriptor.variants {
                 match variant.apply(a.deref_mut()) {
                     Ok(_) => (),
                     Err(err) => {
@@ -525,7 +525,7 @@ pub async fn edit_account(mut req: Request<()>) -> tide::Result {
 }
 
 #[derive(Deserialize)]
-struct AccountEditDescriber {
+struct AccountEditDescriptor {
     variants: Vec<AccountEditMetadataType>,
 }
 
@@ -569,10 +569,10 @@ impl AccountEditMetadataType {
 /// Initiazlize a reset password verification.
 pub async fn reset_password(mut req: Request<()>) -> tide::Result {
     let account_manager = &super::INSTANCE;
-    let describer: ResetPasswordDescriber = req.body_json().await?;
+    let descriptor: ResetPasswordDescriptor = req.body_json().await?;
     for account in account_manager.inner().read().await.iter() {
         let ar = account.read().await;
-        if ar.email() == &describer.email {
+        if ar.email() == &descriptor.email {
             return match ar.deref() {
                 Account::Unverified(_) => Ok(json!({
                     "status": "error",
@@ -588,7 +588,7 @@ pub async fn reset_password(mut req: Request<()>) -> tide::Result {
                             Account::Verified { verify, .. } => {
                                 *verify = UserVerifyVariant::ForgetPassword({
                                     let cxt = verify::Context {
-                                        email: describer.email,
+                                        email: descriptor.email,
                                         code: {
                                             let mut rng = rand::thread_rng();
                                             rng.gen_range(100000..999999)
@@ -652,7 +652,7 @@ pub async fn reset_password(mut req: Request<()>) -> tide::Result {
 }
 
 #[derive(Deserialize)]
-struct ResetPasswordDescriber {
+struct ResetPasswordDescriptor {
     email: lettre::Address,
 }
 
@@ -688,7 +688,7 @@ pub mod manage {
                 )
             }
         };
-        let describer: MakeAccountDescriber = req.body_json().await?;
+        let descriptor: MakeAccountDescriptor = req.body_json().await?;
         match context.valid(vec![Permission::ManageAccounts]).await {
             Ok(able) => {
                 if !able {
@@ -716,17 +716,17 @@ pub mod manage {
                 let account = Account::Verified {
                     id: {
                         let mut hasher = DefaultHasher::new();
-                        describer.email.hash(&mut hasher);
+                        descriptor.email.hash(&mut hasher);
                         hasher.finish()
                     },
                     attributes: UserAttributes {
-                        email: describer.email,
-                        name: describer.name,
-                        school_id: describer.school_id,
-                        phone: describer.phone,
-                        house: describer.house,
-                        organization: describer.organization,
-                        permissions: describer
+                        email: descriptor.email,
+                        name: descriptor.name,
+                        school_id: descriptor.school_id,
+                        phone: descriptor.phone,
+                        house: descriptor.house,
+                        organization: descriptor.organization,
+                        permissions: descriptor
                             .permissions
                             .iter()
                             // Prevent permission overflowing
@@ -735,7 +735,7 @@ pub mod manage {
                             .collect(),
                         registration_time: Utc::now(),
                         registration_ip: req.remote().map(|e| e.to_string()),
-                        password_sha: digest(describer.password),
+                        password_sha: digest(descriptor.password),
                         token_expiration_time: 5,
                     },
                     tokens: Tokens::new(),
@@ -784,7 +784,7 @@ pub mod manage {
     }
 
     #[derive(Deserialize)]
-    struct MakeAccountDescriber {
+    struct MakeAccountDescriptor {
         email: lettre::Address,
         name: String,
         school_id: u32,
@@ -810,7 +810,7 @@ pub mod manage {
                 )
             }
         };
-        let describer: ViewAccountDescriber = req.body_json().await?;
+        let descriptor: ViewAccountDescriptor = req.body_json().await?;
         match context.valid(vec![Permission::ViewAccounts]).await {
             Ok(able) => {
                 if !able {
@@ -824,7 +824,7 @@ pub mod manage {
                 }
                 let ar = account_manager.inner().read().await;
                 let mut vec = Vec::new();
-                for aid in &describer.accounts {
+                for aid in &descriptor.accounts {
                     let a = ar
                         .get(match account_manager.index().read().await.get(aid) {
                             Some(e) => *e,
@@ -875,7 +875,7 @@ pub mod manage {
     }
 
     #[derive(Deserialize)]
-    struct ViewAccountDescriber {
+    struct ViewAccountDescriptor {
         accounts: Vec<u64>,
     }
 
@@ -900,7 +900,7 @@ pub mod manage {
                 )
             }
         };
-        let describer: AccountModifyDescriber = req.body_json().await?;
+        let descriptor: AccountModifyDescriptor = req.body_json().await?;
         match context.valid(vec![Permission::ManageAccounts]).await {
             Ok(able) => {
                 if !able {
@@ -919,7 +919,7 @@ pub mod manage {
                             .index()
                             .read()
                             .await
-                            .get(&describer.account_id)
+                            .get(&descriptor.account_id)
                         {
                             Some(e) => *e,
                             None => {
@@ -945,7 +945,7 @@ pub mod manage {
                         .into(),
                     );
                 }
-                for variant in describer.variants {
+                for variant in descriptor.variants {
                     match variant.apply(a.deref_mut(), &context).await {
                         Ok(_) => continue,
                         Err(err) => {
@@ -980,7 +980,7 @@ pub mod manage {
     }
 
     #[derive(Deserialize)]
-    struct AccountModifyDescriber {
+    struct AccountModifyDescriptor {
         account_id: u64,
         variants: Vec<AccountModifyType>,
     }
