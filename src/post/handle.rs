@@ -138,6 +138,7 @@ pub async fn post(mut req: Request<()>) -> tide::Result {
                         description: describer.description,
                         time_range: describer.time_range,
                     },
+                    requester: cxt.user_id,
                 };
                 if !post.save() {
                     error!("Error while saving post {}", post.id);
@@ -198,11 +199,7 @@ pub async fn view_self_post(req: Request<()>) -> tide::Result {
                 let mut posts = Vec::new();
                 for p in super::INSTANCE.posts.read().await.iter() {
                     let pr = p.read().await;
-                    if pr
-                        .status
-                        .front()
-                        .map_or(false, |e| e.operator == cxt.user_id)
-                    {
+                    if pr.requester == cxt.user_id {
                         posts.push(pr.clone());
                     }
                 }
@@ -231,4 +228,10 @@ pub async fn view_self_post(req: Request<()>) -> tide::Result {
             .into(),
         ),
     }
+}
+
+#[derive(Serialize, Deserialize)]
+struct RequestReviewDescriber {
+    /// The post id.
+    post: u64,
 }

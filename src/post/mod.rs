@@ -38,9 +38,11 @@ pub struct Post {
     id: u64,
     /// File hashes of images.
     images: Vec<u64>,
+    metadata: PostMetadata,
+    /// The requester of this post in user id.
+    requester: u64,
     /// The status of this post (including history statuses).
     status: VecDeque<PostAcceptationData>,
-    metadata: PostMetadata,
 }
 
 impl Post {
