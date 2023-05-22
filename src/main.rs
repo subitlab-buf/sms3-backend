@@ -24,7 +24,7 @@ async fn main() -> tide::Result<()> {
     app.at("/api/account/signout")
         .post(account::handle::sign_out_account);
     app.at("/api/account/view")
-        .post(account::handle::view_account);
+        .get(account::handle::view_account);
     app.at("/api/account/edit")
         .post(account::handle::edit_account);
     app.at("/api/account/resetpassword")
@@ -42,6 +42,8 @@ async fn main() -> tide::Result<()> {
     app.at("/api/post/upload_image")
         .post(post::handle::cache_image);
     app.at("/api/post/create").post(post::handle::post);
+    app.at("/api/post/getself")
+        .get(post::handle::view_self_post);
 
     app.listen("127.0.0.1:8080").await?;
     Ok(())

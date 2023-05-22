@@ -32,7 +32,7 @@ impl Display for PostError {
 impl Error for PostError {}
 
 /// Represents a post posted by a user.
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Post {
     /// The only id of this post.
     id: u64,
@@ -61,7 +61,7 @@ impl Post {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct PostMetadata {
     title: String,
     description: String,
@@ -69,7 +69,7 @@ struct PostMetadata {
     time_range: (NaiveDate, NaiveDate),
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct PostAcceptationData {
     /// Permitter of the acceptation, stored with account id.
     operator: u64,
@@ -79,7 +79,7 @@ struct PostAcceptationData {
 }
 
 /// Describes status of a post.
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum PostAcceptationStatus {
     Accepted(String),
     Pending,
