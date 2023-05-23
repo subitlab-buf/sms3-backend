@@ -199,7 +199,7 @@ pub async fn new_post(mut req: Request<()>) -> tide::Result {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Deserialize)]
 struct PostDescriptor {
     title: String,
     description: String,
@@ -338,20 +338,106 @@ pub async fn request_review(mut req: Request<()>) -> tide::Result {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Deserialize)]
 struct RequestReviewDescriptor {
     post: u64,
     /// The message for admins.
     message: Option<String>,
 }
 
-#[derive(Serialize, Deserialize)]
+pub async fn edit_post(mut req: Request<()>) -> tide::Result {
+    let cxt = match RequirePermissionContext::from_header(&req) {
+        Some(e) => e,
+        None => {
+            return Ok::<tide::Response, tide::Error>(
+                json!({
+                    "status": "error",
+                    "error": "Permission denied",
+                })
+                .into(),
+            )
+        }
+    };
+    let descriptor: EditPostDescriptor = req.body_json().await?;
+    match cxt.valid(vec![Permission::Post]).await {
+        Ok(able) => {
+            if able {
+                for p in super::INSTANCE.posts.read().await.iter() {
+                    let pr = p.read().await;
+                    if pr.id == descriptor.post {
+                        if pr.publisher != cxt.user_id
+                            || pr
+                                .status
+                                .back()
+                                .map(|e| matches!(e.status, PostAcceptationStatus::Submitted(_)))
+                                .unwrap_or_default()
+                        {
+                            return Ok::<tide::Response, tide::Error>(
+                                json!({
+                                    "status": "error",
+                                    "error": "Permission denied",
+                                })
+                                .into(),
+                            );
+                        }
+                        let id = pr.id;
+                        drop(pr);
+                        for variant in descriptor.variants.iter() {
+                            match variant.apply(id, cxt.user_id).await {
+                                Some(err) => {
+                                    return Ok::<tide::Response, tide::Error>(
+                                        json!({
+                                            "status": "error",
+                                            "error": format!("Error occured with post {id}: {err}"),
+                                        })
+                                        .into(),
+                                    );
+                                }
+                                _ => (),
+                            }
+                        }
+                        return Ok::<tide::Response, tide::Error>(
+                            json!({
+                                "status": "success",
+                            })
+                            .into(),
+                        );
+                    }
+                }
+                Ok::<tide::Response, tide::Error>(
+                    json!({
+                        "status": "error",
+                        "error": "Target post not found",
+                    })
+                    .into(),
+                )
+            } else {
+                Ok::<tide::Response, tide::Error>(
+                    json!({
+                        "status": "error",
+                        "error": "Permission denied",
+                    })
+                    .into(),
+                )
+            }
+        }
+        Err(err) => Ok::<tide::Response, tide::Error>(
+            json!({
+                "status": "error",
+                "error": err.to_string(),
+            })
+            .into(),
+        ),
+    }
+}
+
+#[derive(Deserialize)]
 struct EditPostDescriptor {
     post: u64,
     variants: Vec<EditPostVariant>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Deserialize)]
 enum EditPostVariant {
     Title(String),
     Description(String),
@@ -362,4 +448,93 @@ enum EditPostVariant {
     CancelSubmittion,
     /// Remove the post and unblock all the images it use.
     Destroy,
+}
+
+impl EditPostVariant {
+    /// Apply this edition, return an err if error occurs.
+    pub async fn apply(&self, post_id: u64, user_id: u64) -> Option<String> {
+        let posts = super::INSTANCE.posts.read().await;
+        let mut post = match {
+            let mut e = None;
+            for p in posts.iter() {
+                if p.read().await.id == post_id {
+                    e = Some(p.write().await);
+                    break;
+                }
+            }
+            e
+        } {
+            Some(e) => e,
+            None => return Some("Post not found".to_string()),
+        };
+        match self {
+            EditPostVariant::Title(value) => post.metadata.title = value.clone(),
+            EditPostVariant::Description(value) => post.metadata.description = value.clone(),
+            EditPostVariant::Images(imgs) => {
+                let cache = super::cache::INSTANCE.caches.read().await;
+                for img_id in post.images.iter() {
+                    cache
+                        .iter()
+                        .find(|e| e.hash == *img_id)
+                        .map(|e| e.blocked.store(false, atomic::Ordering::Relaxed));
+                }
+                for img_id in imgs.iter() {
+                    if !cache.iter().any(|e| e.hash == *img_id) {
+                        return Some(format!("Target image cache {} not fount", img_id));
+                    }
+                }
+                for img_id in imgs.iter() {
+                    cache
+                        .iter()
+                        .find(|e| e.hash == *img_id)
+                        .unwrap()
+                        .blocked
+                        .store(true, atomic::Ordering::Relaxed)
+                }
+            }
+            EditPostVariant::TimeRange(start, end) => {
+                if start
+                    .checked_add_days(Days::new(7))
+                    .map_or(false, |e| &e > end)
+                {
+                    return Some("Post time out of range".to_string());
+                }
+                post.metadata.time_range = (*start, *end);
+            }
+            EditPostVariant::CancelSubmittion => {
+                if post.status.back().map_or(true, |e| {
+                    matches!(e.status, PostAcceptationStatus::Submitted(_))
+                }) {
+                    return Some("Target post was already submitted".to_string());
+                }
+                post.status.push_back(super::PostAcceptationData {
+                    operator: user_id,
+                    status: PostAcceptationStatus::Pending,
+                    time: Utc::now(),
+                })
+            }
+            EditPostVariant::Destroy => {
+                if !post.remove() {
+                    error!("Post {} save failed", post.id);
+                }
+                drop(post);
+                drop(posts);
+                let mut posts = super::INSTANCE.posts.write().await;
+                let mut i = None;
+                for post in posts.iter().enumerate() {
+                    if post.1.read().await.id == post_id {
+                        i = Some(post.0);
+                        break;
+                    }
+                }
+                match i {
+                    Some(e) => {
+                        posts.remove(e);
+                    }
+                    None => return Some("Post not found".to_string()),
+                }
+            }
+        }
+        None
+    }
 }
