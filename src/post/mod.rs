@@ -49,6 +49,7 @@ pub struct Post {
 impl Post {
     #[must_use = "The save result should be handled"]
     pub fn save(&self) -> bool {
+        #[cfg(not(test))]
         match File::create(format!("./data/posts/{}.toml", self.id)) {
             Ok(mut file) => file
                 .write_all(
@@ -61,11 +62,18 @@ impl Post {
                 .is_ok(),
             Err(_) => false,
         }
+
+        #[cfg(test)]
+        true
     }
 
     #[must_use = "The deletion result should be handled"]
     pub fn remove(&self) -> bool {
-        fs::remove_file(format!("./data/posts/{}.toml", self.id)).is_ok()
+        #[cfg(not(test))]
+        return fs::remove_file(format!("./data/posts/{}.toml", self.id)).is_ok();
+
+        #[cfg(test)]
+        true
     }
 }
 
@@ -113,33 +121,41 @@ pub struct PostManager {
 
 impl PostManager {
     fn new() -> Self {
-        let mut vec = Vec::new();
-        for dir in fs::read_dir("./data/posts").unwrap() {
-            match dir {
-                Ok(f) => match {
-                    toml::from_str::<Post>(&{
-                        let mut string = String::new();
-                        File::open(f.path())
-                            .unwrap()
-                            .read_to_string(&mut string)
-                            .unwrap();
-                        string
-                    })
-                } {
-                    Ok(cache) => vec.push(cache),
+        #[cfg(not(test))]
+        {
+            let mut vec = Vec::new();
+            for dir in fs::read_dir("./data/posts").unwrap() {
+                match dir {
+                    Ok(f) => match {
+                        toml::from_str::<Post>(&{
+                            let mut string = String::new();
+                            File::open(f.path())
+                                .unwrap()
+                                .read_to_string(&mut string)
+                                .unwrap();
+                            string
+                        })
+                    } {
+                        Ok(cache) => vec.push(cache),
+                        Err(_) => (),
+                    },
                     Err(_) => (),
+                }
+            }
+            Self {
+                posts: {
+                    let mut v = Vec::new();
+                    for e in vec {
+                        v.push(RwLock::new(e));
+                    }
+                    RwLock::new(v)
                 },
-                Err(_) => (),
             }
         }
+
+        #[cfg(test)]
         Self {
-            posts: {
-                let mut v = Vec::new();
-                for e in vec {
-                    v.push(RwLock::new(e));
-                }
-                RwLock::new(v)
-            },
+            posts: RwLock::new(Vec::new()),
         }
     }
 

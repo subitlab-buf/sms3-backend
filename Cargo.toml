@@ -24,3 +24,6 @@ serde_json = "*"
 toml = "0.7"
 sha256 = "*"
 image = "0.24"
+
+[dev-dependencies]
+tide-testing = "0.1"

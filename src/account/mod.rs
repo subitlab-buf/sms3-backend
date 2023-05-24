@@ -10,9 +10,7 @@ use sha256::digest;
 use std::{
     collections::{hash_map::DefaultHasher, HashMap},
     fmt::Display,
-    fs::{self, File},
     hash::{Hash, Hasher},
-    io::{Read, Write},
     ops::{Deref, DerefMut},
 };
 use tide::log::error;
@@ -246,8 +244,11 @@ impl Account {
     }
 
     /// Save this account and return whether if this account was saved successfully.
+    #[cfg(not(test))]
     #[must_use = "The save result should be handled"]
     pub fn save(&self) -> bool {
+        use std::fs::File;
+        use std::io::Write;
         if let Ok(mut file) = File::create(format!("./data/accounts/{}.toml", self.id())) {
             file.write_all(
                 match toml::to_string(&self) {
@@ -262,9 +263,24 @@ impl Account {
         }
     }
 
+    /// Save this account and return whether if this account was saved successfully.
+    #[cfg(test)]
+    #[must_use = "The save result should be handled"]
+    pub fn save(&self) -> bool {
+        true
+    }
+
     /// Remove this account from filesystem and return whether this account was removed successfully.
+    #[cfg(not(test))]
     pub fn remove(&self) -> bool {
+        use std::fs;
         fs::remove_file(format!("./data/accounts/{}.json", self.id())).is_ok()
+    }
+
+    /// Remove this account from filesystem and return whether this account was removed successfully.
+    #[cfg(test)]
+    pub fn remove(&self) -> bool {
+        true
     }
 }
 
@@ -391,31 +407,43 @@ pub struct AccountManager {
 impl AccountManager {
     /// Read and create an account manager from `./data/accounts`.
     pub fn new() -> Self {
-        let mut vec = Vec::new();
-        let mut index = HashMap::new();
-        let mut i = 0;
-        for dir in fs::read_dir("./data/accounts").unwrap() {
-            if let Ok(e) = dir.map(|e| {
-                toml::from_str::<Account>(&{
-                    let mut string = String::new();
-                    File::open(e.path())
-                        .unwrap()
-                        .read_to_string(&mut string)
-                        .unwrap();
-                    string
-                })
-                .unwrap()
-            }) {
-                index.insert(e.id(), i);
-                vec.push(RwLock::new(e));
-                i += 1;
-            } else {
-                continue;
+        #[cfg(not(test))]
+        {
+            use std::fs::{self, File};
+            use std::io::Read;
+
+            let mut vec = Vec::new();
+            let mut index = HashMap::new();
+            let mut i = 0;
+            for dir in fs::read_dir("./data/accounts").unwrap() {
+                if let Ok(e) = dir.map(|e| {
+                    toml::from_str::<Account>(&{
+                        let mut string = String::new();
+                        File::open(e.path())
+                            .unwrap()
+                            .read_to_string(&mut string)
+                            .unwrap();
+                        string
+                    })
+                    .unwrap()
+                }) {
+                    index.insert(e.id(), i);
+                    vec.push(RwLock::new(e));
+                    i += 1;
+                } else {
+                    continue;
+                }
+            }
+            Self {
+                accounts: RwLock::new(vec),
+                index: RwLock::new(index),
             }
         }
+
+        #[cfg(test)]
         Self {
-            accounts: RwLock::new(vec),
-            index: RwLock::new(index),
+            accounts: RwLock::new(Vec::new()),
+            index: RwLock::new(HashMap::new()),
         }
     }
 
@@ -524,5 +552,17 @@ impl AccountManager {
             self.accounts.write().await.remove(*index);
         }
         self.update_index().await;
+    }
+
+    /// Push an account to this instance, only for testing.
+    #[cfg(test)]
+    pub async fn push(&self, account: Account) {
+        assert!(self
+            .index
+            .write()
+            .await
+            .insert(account.id(), self.accounts.read().await.len())
+            .is_none());
+        self.accounts.write().await.push(RwLock::new(account));
     }
 }

@@ -1,6 +1,9 @@
 mod account;
-pub mod config;
+pub(crate) mod config;
 mod post;
+
+#[cfg(test)]
+mod tests;
 
 use account::{AccountManagerError, Permissions};
 use std::ops::Deref;

@@ -47,6 +47,7 @@ impl PostImageCache {
         ))
     }
 
+    #[cfg(not(test))]
     #[must_use = "The save result should be handled"]
     async fn save(&self) -> bool {
         (match &self.img.read().await.deref() {
@@ -74,6 +75,13 @@ impl PostImageCache {
             Err(_) => false,
         })
     }
+
+    #[cfg(test)]
+    #[must_use = "The save result should be handled"]
+    async fn save(&self) -> bool {
+        *self.img.write().await.deref_mut() = None;
+        true
+    }
 }
 
 pub struct CacheManager {
@@ -84,27 +92,35 @@ impl CacheManager {
     const MAX_UNBLOCKED_CACHE: usize = 64;
 
     pub fn new() -> Self {
-        let mut vec = Vec::new();
-        for dir in fs::read_dir("./data/images").unwrap() {
-            match dir {
-                Ok(f) => match {
-                    toml::from_str::<PostImageCache>(&{
-                        let mut string = String::new();
-                        File::open(f.path())
-                            .unwrap()
-                            .read_to_string(&mut string)
-                            .unwrap();
-                        string
-                    })
-                } {
-                    Ok(cache) => vec.push(cache),
+        #[cfg(not(test))]
+        {
+            let mut vec = Vec::new();
+            for dir in fs::read_dir("./data/images").unwrap() {
+                match dir {
+                    Ok(f) => match {
+                        toml::from_str::<PostImageCache>(&{
+                            let mut string = String::new();
+                            File::open(f.path())
+                                .unwrap()
+                                .read_to_string(&mut string)
+                                .unwrap();
+                            string
+                        })
+                    } {
+                        Ok(cache) => vec.push(cache),
+                        Err(_) => (),
+                    },
                     Err(_) => (),
-                },
-                Err(_) => (),
+                }
+            }
+            Self {
+                caches: RwLock::new(vec),
             }
         }
+
+        #[cfg(test)]
         Self {
-            caches: RwLock::new(vec),
+            caches: RwLock::new(Vec::new()),
         }
     }
 

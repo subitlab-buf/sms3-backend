@@ -106,7 +106,10 @@ pub async fn get_image(mut req: Request<()>) -> tide::Result {
                 for img in super::cache::INSTANCE.caches.read().await.iter() {
                     if img.hash == descriptor.hash {
                         return Ok::<tide::Response, tide::Error>({
+                            #[allow(unused_mut)]
                             let mut rep = tide::Response::new(StatusCode::Ok);
+
+                            #[cfg(not(test))]
                             rep.set_body(Body::from_reader(
                                 match async_std::fs::File::open(format!(
                                     "./data/images/{}.png",
@@ -123,6 +126,7 @@ pub async fn get_image(mut req: Request<()>) -> tide::Result {
                                 },
                                 None,
                             ));
+
                             rep
                         });
                     }

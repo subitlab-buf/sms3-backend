@@ -11,7 +11,11 @@ use serde::{Deserialize, Serialize};
 use sha256::digest;
 use tide::log::info;
 
+#[cfg(not(test))]
 pub(super) static SENDER_INSTANCE: Lazy<VerificationSender> = Lazy::new(VerificationSender::new);
+
+#[cfg(test)]
+pub static VERIFICATION_CODE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 /// Represent infos of an unverified object.
 #[derive(Serialize, Deserialize, Debug)]
@@ -30,10 +34,20 @@ impl Context {
             "Sending verification code for {} (code: {})",
             self.email, self.code
         );
-        SENDER_INSTANCE
-            .send_verification(self)
-            .await
-            .map_err(|err| AccountError::MailSendError(err.to_string()))?;
+
+        #[cfg(not(test))]
+        {
+            SENDER_INSTANCE
+                .send_verification(self)
+                .await
+                .map_err(|err| AccountError::MailSendError(err.to_string()))?;
+        }
+
+        #[cfg(test)]
+        {
+            VERIFICATION_CODE.store(self.code, std::sync::atomic::Ordering::Relaxed);
+        }
+
         info!("Verification code for {} sent", self.email);
         Ok(())
     }
