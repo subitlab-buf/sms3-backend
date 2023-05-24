@@ -46,6 +46,8 @@ async fn main() -> tide::Result<()> {
     app.at("/api/post/request-review")
         .post(post::handle::request_review);
     app.at("/api/post/edit").post(post::handle::edit_post);
+    app.at("/api/post/get-info")
+        .post(post::handle::get_posts_info);
 
     app.listen("127.0.0.1:8080").await?;
     Ok(())
