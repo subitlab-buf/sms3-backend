@@ -320,94 +320,6 @@ impl GetPostsFilter {
     }
 }
 
-/// Request a review to admins
-/// by adding `Submitted` to the target status deque.
-pub async fn request_review(mut req: Request<()>) -> tide::Result {
-    let cxt = match RequirePermissionContext::from_header(&req) {
-        Some(e) => e,
-        None => {
-            return Ok::<tide::Response, tide::Error>(
-                json!({
-                    "status": "error",
-                    "error": "Permission denied",
-                })
-                .into(),
-            )
-        }
-    };
-    let descriptor: RequestReviewDescriptor = req.body_json().await?;
-    match cxt.valid(vec![Permission::Post]).await {
-        Ok(able) => {
-            if able {
-                for p in super::INSTANCE.posts.read().await.iter() {
-                    let pr = p.read().await;
-                    if pr.id == descriptor.post {
-                        if pr.publisher != cxt.user_id
-                            || pr
-                                .status
-                                .back()
-                                .map(|e| matches!(e.status, PostAcceptationStatus::Submitted(_)))
-                                .unwrap_or_default()
-                        {
-                            return Ok::<tide::Response, tide::Error>(
-                                json!({
-                                    "status": "error",
-                                    "error": "Permission denied",
-                                })
-                                .into(),
-                            );
-                        }
-                        drop(pr);
-                        let mut pw = p.write().await;
-                        pw.status.push_back(super::PostAcceptationData {
-                            operator: cxt.user_id,
-                            status: PostAcceptationStatus::Submitted(
-                                descriptor.message.unwrap_or_default(),
-                            ),
-                            time: Utc::now(),
-                        });
-                        return Ok::<tide::Response, tide::Error>(
-                            json!({
-                                "status": "success",
-                            })
-                            .into(),
-                        );
-                    }
-                }
-                Ok::<tide::Response, tide::Error>(
-                    json!({
-                        "status": "error",
-                        "error": "Target post not found",
-                    })
-                    .into(),
-                )
-            } else {
-                Ok::<tide::Response, tide::Error>(
-                    json!({
-                        "status": "error",
-                        "error": "Permission denied",
-                    })
-                    .into(),
-                )
-            }
-        }
-        Err(err) => Ok::<tide::Response, tide::Error>(
-            json!({
-                "status": "error",
-                "error": err.to_string(),
-            })
-            .into(),
-        ),
-    }
-}
-
-#[derive(Deserialize)]
-struct RequestReviewDescriptor {
-    post: u64,
-    /// The message for admins.
-    message: Option<String>,
-}
-
 pub async fn edit_post(mut req: Request<()>) -> tide::Result {
     let cxt = match RequirePermissionContext::from_header(&req) {
         Some(e) => e,
@@ -509,6 +421,10 @@ enum EditPostVariant {
     /// Change status of the post to `Pending`
     /// if the target status is `Submitted`.
     CancelSubmittion,
+    RequestReview(
+        /// Message to admins.
+        String,
+    ),
     /// Remove the post and unblock all the images it use.
     Destroy,
 }
@@ -565,10 +481,12 @@ impl EditPostVariant {
                 post.metadata.time_range = (*start, *end);
             }
             EditPostVariant::CancelSubmittion => {
-                if post.status.back().map_or(true, |e| {
-                    matches!(e.status, PostAcceptationStatus::Submitted(_))
-                }) {
-                    return Some("Target post was already submitted".to_string());
+                if post
+                    .status
+                    .back()
+                    .map_or(true, |e| matches!(e.status, PostAcceptationStatus::Pending))
+                {
+                    return Some("Target post was already pended".to_string());
                 }
                 post.status.push_back(super::PostAcceptationData {
                     operator: user_id,
@@ -596,6 +514,18 @@ impl EditPostVariant {
                     }
                     None => return Some("Post not found".to_string()),
                 }
+            }
+            EditPostVariant::RequestReview(msg) => {
+                if post.status.back().map_or(true, |e| {
+                    matches!(e.status, PostAcceptationStatus::Submitted(_))
+                }) {
+                    return Some("Target post was already submitted".to_string());
+                }
+                post.status.push_back(super::PostAcceptationData {
+                    operator: user_id,
+                    status: PostAcceptationStatus::Submitted(msg.clone()),
+                    time: Utc::now(),
+                })
             }
         }
         None
@@ -636,6 +566,7 @@ pub async fn get_posts_info(mut req: Request<()>) -> tide::Result {
                 let posts = super::INSTANCE.posts.read().await;
                 let date = Utc::now().date_naive();
                 for p in descriptor.posts.iter() {
+                    let mut ps = false;
                     for e in posts.iter() {
                         let er = e.read().await;
                         if er.id == *p {
@@ -651,10 +582,14 @@ pub async fn get_posts_info(mut req: Request<()>) -> tide::Result {
                                     title: er.metadata.title.clone(),
                                 })
                             } else {
-                                results.push(GetPostInfoResult::PermissionDenied(er.id))
+                                results.push(GetPostInfoResult::NotFound(er.id))
                             }
+                            ps = true;
                             break;
                         }
+                    }
+                    if !ps {
+                        results.push(GetPostInfoResult::NotFound(*p))
                     }
                 }
                 Ok::<tide::Response, tide::Error>(
@@ -697,8 +632,141 @@ enum GetPostInfoResult {
         images: Vec<u64>,
         title: String,
     },
-    PermissionDenied(
-        /// Post id
+    NotFound(
+        /// Target post id
         u64,
+    ),
+}
+
+pub async fn approve_post(mut req: Request<()>) -> tide::Result {
+    let cxt = match RequirePermissionContext::from_header(&req) {
+        Some(e) => e,
+        None => {
+            return Ok::<tide::Response, tide::Error>(
+                json!({
+                    "status": "error",
+                    "error": "Permission denied",
+                })
+                .into(),
+            )
+        }
+    };
+    let descriptor: ApprovePostDescriptor = req.body_json().await?;
+    match cxt.valid(vec![Permission::Approve]).await {
+        Ok(able) => {
+            if able {
+                let posts = super::INSTANCE.posts.read().await;
+                for p in posts.iter() {
+                    let pr = p.read().await;
+                    if pr.id == descriptor.post {
+                        drop(pr);
+                        let mut pw = p.write().await;
+                        return match descriptor.variant {
+                            ApprovePostVariant::Accept(msg) => {
+                                if pw.status.back().map_or(false, |e| {
+                                    matches!(e.status, PostAcceptationStatus::Accepted(_))
+                                }) {
+                                    return Ok::<tide::Response, tide::Error>(
+                                        json!({
+                                            "status": "error",
+                                            "error": "Target post has already been accepted",
+                                        })
+                                        .into(),
+                                    );
+                                }
+                                pw.status.push_back(super::PostAcceptationData {
+                                    operator: cxt.user_id,
+                                    status: PostAcceptationStatus::Accepted(
+                                        msg.unwrap_or_default(),
+                                    ),
+                                    time: Utc::now(),
+                                });
+                                Ok::<tide::Response, tide::Error>(
+                                    json!({
+                                        "status": "success",
+                                    })
+                                    .into(),
+                                )
+                            }
+                            ApprovePostVariant::Reject(msg) => {
+                                if pw.status.back().map_or(false, |e| {
+                                    matches!(e.status, PostAcceptationStatus::Rejected(_))
+                                }) {
+                                    return Ok::<tide::Response, tide::Error>(
+                                        json!({
+                                            "status": "error",
+                                            "error": "Target post has already been rejected",
+                                        })
+                                        .into(),
+                                    );
+                                }
+                                pw.status.push_back(super::PostAcceptationData {
+                                    operator: cxt.user_id,
+                                    status: PostAcceptationStatus::Rejected({
+                                        if msg.is_empty() {
+                                            return Ok::<tide::Response, tide::Error>(
+                                                json!({
+                                                    "status": "error",
+                                                    "error": "Message couldn't be empty",
+                                                })
+                                                .into(),
+                                            );
+                                        }
+                                        msg
+                                    }),
+                                    time: Utc::now(),
+                                });
+                                Ok::<tide::Response, tide::Error>(
+                                    json!({
+                                        "status": "success",
+                                    })
+                                    .into(),
+                                )
+                            }
+                        };
+                    }
+                }
+                Ok::<tide::Response, tide::Error>(
+                    json!({
+                        "status": "error",
+                        "error": "Target post not found",
+                    })
+                    .into(),
+                )
+            } else {
+                Ok::<tide::Response, tide::Error>(
+                    json!({
+                        "status": "error",
+                        "error": "Permission denied",
+                    })
+                    .into(),
+                )
+            }
+        }
+        Err(err) => Ok::<tide::Response, tide::Error>(
+            json!({
+                "status": "error",
+                "error": err.to_string(),
+            })
+            .into(),
+        ),
+    }
+}
+
+#[derive(Deserialize)]
+struct ApprovePostDescriptor {
+    post: u64,
+    variant: ApprovePostVariant,
+}
+
+#[derive(Deserialize)]
+enum ApprovePostVariant {
+    Accept(
+        /// Message
+        Option<String>,
+    ),
+    Reject(
+        /// Message, should not be empty.
+        String,
     ),
 }
