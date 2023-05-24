@@ -243,10 +243,12 @@ pub async fn get_posts(mut req: Request<()>) -> tide::Result {
                 let mut posts = Vec::new();
                 for p in super::INSTANCE.posts.read().await.iter() {
                     let pr = p.read().await;
-                    for filter in descriptor.filters.iter() {
-                        if filter.matches(pr.deref(), ar.deref()) {
-                            posts.push(pr.id);
-                        }
+                    if descriptor
+                        .filters
+                        .iter()
+                        .all(|f| f.matches(pr.deref(), ar.deref()))
+                    {
+                        posts.push(pr.id);
                     }
                 }
                 Ok::<tide::Response, tide::Error>(
