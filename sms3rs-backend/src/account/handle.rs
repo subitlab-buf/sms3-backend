@@ -85,7 +85,7 @@ pub async fn verify_account(mut req: Request<()>) -> tide::Result {
     let descriptor: AccountVerifyDescriptor = req.body_json().await?;
     for account in account_manager.inner().read().await.iter() {
         match &descriptor.variant {
-            AccountVerifyVariant::Activiate {
+            AccountVerifyVariant::Activate {
                 email,
                 name,
                 id,
@@ -109,7 +109,7 @@ pub async fn verify_account(mut req: Request<()>) -> tide::Result {
                     let mut a = account.write().await;
                     if let Err(err) = a.verify(
                         descriptor.code,
-                        super::AccountVerifyVariant::Activiate(UserAttributes {
+                        super::AccountVerifyVariant::Activate(UserAttributes {
                             email: email.clone(),
                             name: name.clone(),
                             school_id: *id,
@@ -200,8 +200,8 @@ struct AccountVerifyDescriptor {
 
 #[derive(Deserialize)]
 enum AccountVerifyVariant {
-    /// Activiate an unverified account.
-    Activiate {
+    /// Activate an unverified account.
+    Activate {
         email: lettre::Address,
         name: String,
         id: u32,
@@ -566,7 +566,7 @@ impl AccountEditMetadataType {
     }
 }
 
-/// Initiazlize a reset password verification.
+/// Initialize a reset password verification.
 pub async fn reset_password(mut req: Request<()>) -> tide::Result {
     let account_manager = &super::INSTANCE;
     let descriptor: ResetPasswordDescriptor = req.body_json().await?;

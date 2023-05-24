@@ -1,15 +1,11 @@
 use super::AccountError;
-use crate::config;
 use chrono::{Days, NaiveDateTime, Utc};
-use lettre::{
-    message::{header::ContentType, Mailbox},
-    transport::smtp::authentication::Credentials,
-    AsyncSmtpTransport, AsyncStd1Executor, AsyncTransport, Message,
-};
-use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use sha256::digest;
 use tide::log::info;
+
+#[cfg(not(test))]
+use once_cell::sync::Lazy;
 
 #[cfg(not(test))]
 pub(super) static SENDER_INSTANCE: Lazy<VerificationSender> = Lazy::new(VerificationSender::new);
@@ -116,18 +112,24 @@ impl Tokens {
     }
 }
 
+#[cfg(not(test))]
 pub struct VerificationSender {
     config: &'static crate::config::MailSmtp,
 }
 
+#[cfg(not(test))]
 impl VerificationSender {
     pub fn new() -> Self {
         Self {
-            config: &config::INSTANCE.mail_smtp,
+            config: &crate::config::INSTANCE.mail_smtp,
         }
     }
 
-    fn mailer(&self) -> AsyncSmtpTransport<AsyncStd1Executor> {
+    fn mailer(&self) -> lettre::AsyncSmtpTransport<lettre::AsyncStd1Executor> {
+        use lettre::{
+            transport::smtp::authentication::Credentials, AsyncSmtpTransport, AsyncStd1Executor,
+        };
+
         AsyncSmtpTransport::<AsyncStd1Executor>::relay(&self.config.server)
             .unwrap()
             .port(self.config.port)
@@ -142,6 +144,11 @@ impl VerificationSender {
         &self,
         cxt: &Context,
     ) -> Result<(), lettre::transport::smtp::Error> {
+        use lettre::{
+            message::{header::ContentType, Mailbox},
+            AsyncTransport, Message,
+        };
+
         let mailer = self.mailer();
         mailer
             .send(

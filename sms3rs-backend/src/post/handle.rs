@@ -5,7 +5,6 @@ use crate::account::Account;
 use crate::account::Permission;
 use crate::post::cache::PostImageCache;
 use crate::RequirePermissionContext;
-use async_std::io::BufReader;
 use chrono::Days;
 use chrono::NaiveDate;
 use chrono::Utc;
@@ -17,7 +16,6 @@ use std::ops::Deref;
 use std::sync::atomic;
 use tide::log::error;
 use tide::prelude::*;
-use tide::Body;
 use tide::Request;
 use tide::StatusCode;
 
@@ -110,22 +108,26 @@ pub async fn get_image(mut req: Request<()>) -> tide::Result {
                             let mut rep = tide::Response::new(StatusCode::Ok);
 
                             #[cfg(not(test))]
-                            rep.set_body(Body::from_reader(
-                                match async_std::fs::File::open(format!(
-                                    "./data/images/{}.png",
-                                    img.hash
-                                ))
-                                .await
-                                {
-                                    Ok(e) => BufReader::new(e),
-                                    Err(_) => {
-                                        return Ok::<tide::Response, tide::Error>(
-                                            tide::Response::new(StatusCode::NoContent),
-                                        )
-                                    }
-                                },
-                                None,
-                            ));
+                            {
+                                use async_std::io::BufReader;
+                                use tide::Body;
+                                rep.set_body(Body::from_reader(
+                                    match async_std::fs::File::open(format!(
+                                        "./data/images/{}.png",
+                                        img.hash
+                                    ))
+                                    .await
+                                    {
+                                        Ok(e) => BufReader::new(e),
+                                        Err(_) => {
+                                            return Ok::<tide::Response, tide::Error>(
+                                                tide::Response::new(StatusCode::NoContent),
+                                            )
+                                        }
+                                    },
+                                    None,
+                                ));
+                            }
 
                             rep
                         });
@@ -355,12 +357,12 @@ struct GetPostsDescriptor {
 #[derive(Deserialize)]
 enum GetPostsFilter {
     /// Posts that match target status.
-    Acception(PostAcceptationStatus),
+    Accepting(PostAcceptationStatus),
     /// Posts published by target account.
     Account(u64),
     After(NaiveDate),
     Before(NaiveDate),
-    /// Posts which thier title and description contains target keywords.
+    /// Posts which their title and description contains target keywords.
     Keyword(String),
 }
 
@@ -369,7 +371,7 @@ impl GetPostsFilter {
     fn matches(&self, post: &Post, user: &Account) -> bool {
         let date = Utc::now().date_naive();
         (match self {
-            GetPostsFilter::Acception(status) => {
+            GetPostsFilter::Accepting(status) => {
                 post.status.back().map_or(false, |s| &s.status == status)
             }
             GetPostsFilter::Account(account) => &post.publisher == account,
@@ -432,7 +434,7 @@ pub async fn edit_post(mut req: Request<()>) -> tide::Result {
                                     return Ok::<tide::Response, tide::Error>(
                                         json!({
                                             "status": "error",
-                                            "error": format!("Error occured with post variant {id}: {err}"),
+                                            "error": format!("Error occurred with post variant {id}: {err}"),
                                         })
                                         .into(),
                                     );
@@ -489,7 +491,7 @@ enum EditPostVariant {
     TimeRange(NaiveDate, NaiveDate),
     /// Change status of the post to `Pending`
     /// if the target status is `Submitted`.
-    CancelSubmittion,
+    CancelSubmission,
     RequestReview(
         /// Message to admins.
         String,
@@ -548,7 +550,7 @@ impl EditPostVariant {
                 }
                 post.metadata.time_range = (*start, *end);
             }
-            EditPostVariant::CancelSubmittion => {
+            EditPostVariant::CancelSubmission => {
                 if post
                     .status
                     .back()
@@ -653,7 +655,7 @@ pub async fn get_posts_info(mut req: Request<()>) -> tide::Result {
                                 && er.metadata.time_range.1 >= date
                                 && ar.has_permission(Permission::View)
                             {
-                                results.push(GetPostInfoResult::Forigen {
+                                results.push(GetPostInfoResult::Foreign {
                                     id: er.id,
                                     images: er.images.clone(),
                                     title: er.metadata.title.clone(),
@@ -704,7 +706,7 @@ struct GetPostsInfoDescriptor {
 #[derive(Serialize)]
 enum GetPostInfoResult {
     Full(Post),
-    Forigen {
+    Foreign {
         id: u64,
         images: Vec<u64>,
         title: String,

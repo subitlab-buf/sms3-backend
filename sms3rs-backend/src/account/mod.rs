@@ -118,7 +118,7 @@ impl Account {
         variant: AccountVerifyVariant,
     ) -> Result<(), AccountError> {
         match variant {
-            AccountVerifyVariant::Activiate(attributes) => {
+            AccountVerifyVariant::Activate(attributes) => {
                 if let Self::Unverified(cxt) = self {
                     if cxt.code != verify_code {
                         return Err(AccountError::VerificationCodeError);
@@ -285,8 +285,8 @@ impl Account {
 }
 
 enum AccountVerifyVariant {
-    /// Activiate an unverified account.
-    Activiate(UserAttributes),
+    /// Activate an unverified account.
+    Activate(UserAttributes),
     /// Reset a forgotten password.
     ResetPassword(String),
 }

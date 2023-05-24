@@ -6,13 +6,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use image::ImageError;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::VecDeque,
-    error::Error,
-    fmt::Display,
-    fs::{self, File},
-    io::{Read, Write},
-};
+use std::{collections::VecDeque, error::Error, fmt::Display};
 
 pub static INSTANCE: Lazy<PostManager> = Lazy::new(PostManager::new);
 
@@ -50,17 +44,22 @@ impl Post {
     #[must_use = "The save result should be handled"]
     pub fn save(&self) -> bool {
         #[cfg(not(test))]
-        match File::create(format!("./data/posts/{}.toml", self.id)) {
-            Ok(mut file) => file
-                .write_all(
-                    match toml::to_string(self) {
-                        Ok(s) => s,
-                        Err(_) => return false,
-                    }
-                    .as_bytes(),
-                )
-                .is_ok(),
-            Err(_) => false,
+        {
+            use std::fs::File;
+            use std::io::Write;
+
+            match File::create(format!("./data/posts/{}.toml", self.id)) {
+                Ok(mut file) => file
+                    .write_all(
+                        match toml::to_string(self) {
+                            Ok(s) => s,
+                            Err(_) => return false,
+                        }
+                        .as_bytes(),
+                    )
+                    .is_ok(),
+                Err(_) => false,
+            }
         }
 
         #[cfg(test)]
@@ -70,7 +69,10 @@ impl Post {
     #[must_use = "The deletion result should be handled"]
     pub fn remove(&self) -> bool {
         #[cfg(not(test))]
-        return fs::remove_file(format!("./data/posts/{}.toml", self.id)).is_ok();
+        {
+            use std::fs;
+            return fs::remove_file(format!("./data/posts/{}.toml", self.id)).is_ok();
+        }
 
         #[cfg(test)]
         true
@@ -123,6 +125,9 @@ impl PostManager {
     fn new() -> Self {
         #[cfg(not(test))]
         {
+            use std::fs::{self, File};
+            use std::io::Read;
+
             let mut vec = Vec::new();
             for dir in fs::read_dir("./data/posts").unwrap() {
                 match dir {

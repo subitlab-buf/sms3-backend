@@ -5,10 +5,9 @@ use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::hash_map::DefaultHasher,
-    fs::{self, File},
+    fs,
     hash::{Hash, Hasher},
-    io::{Read, Write},
-    ops::{Deref, DerefMut},
+    ops::DerefMut,
     sync::atomic::{AtomicBool, Ordering},
 };
 use tide::log::error;
@@ -50,6 +49,10 @@ impl PostImageCache {
     #[cfg(not(test))]
     #[must_use = "The save result should be handled"]
     async fn save(&self) -> bool {
+        use std::fs::File;
+        use std::io::Write;
+        use std::ops::Deref;
+
         (match &self.img.read().await.deref() {
             Some(img) => {
                 let ok = img
@@ -94,6 +97,9 @@ impl CacheManager {
     pub fn new() -> Self {
         #[cfg(not(test))]
         {
+            use std::fs::File;
+            use std::io::Read;
+
             let mut vec = Vec::new();
             for dir in fs::read_dir("./data/images").unwrap() {
                 match dir {
