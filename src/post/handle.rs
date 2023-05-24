@@ -1,5 +1,7 @@
 use super::Post;
 use super::PostAcceptationStatus;
+use crate::account;
+use crate::account::Account;
 use crate::account::Permission;
 use crate::post::cache::PostImageCache;
 use crate::RequirePermissionContext;
@@ -10,6 +12,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::collections::VecDeque;
 use std::hash::Hash;
 use std::hash::Hasher;
+use std::ops::Deref;
 use std::sync::atomic;
 use tide::log::error;
 use tide::prelude::*;
@@ -207,7 +210,7 @@ struct PostDescriptor {
     images: Vec<u64>,
 }
 
-pub async fn view_self_post(req: Request<()>) -> tide::Result {
+pub async fn get_posts(mut req: Request<()>) -> tide::Result {
     let cxt = match RequirePermissionContext::from_header(&req) {
         Some(e) => e,
         None => {
@@ -220,14 +223,30 @@ pub async fn view_self_post(req: Request<()>) -> tide::Result {
             )
         }
     };
+    let descriptor: GetPostsDescriptor = req.body_json().await?;
     match cxt.valid(vec![]).await {
         Ok(able) => {
             if able {
+                let am = account::INSTANCE.inner().read().await;
+                let ar = am
+                    .get(
+                        *account::INSTANCE
+                            .index()
+                            .read()
+                            .await
+                            .get(&cxt.user_id)
+                            .unwrap(),
+                    )
+                    .unwrap()
+                    .read()
+                    .await;
                 let mut posts = Vec::new();
                 for p in super::INSTANCE.posts.read().await.iter() {
                     let pr = p.read().await;
-                    if pr.publisher == cxt.user_id {
-                        posts.push(pr.clone());
+                    for filter in descriptor.filters.iter() {
+                        if filter.matches(pr.deref(), ar.deref()) {
+                            posts.push(pr.id);
+                        }
                     }
                 }
                 Ok::<tide::Response, tide::Error>(
@@ -254,6 +273,48 @@ pub async fn view_self_post(req: Request<()>) -> tide::Result {
             })
             .into(),
         ),
+    }
+}
+
+#[derive(Deserialize)]
+struct GetPostsDescriptor {
+    filters: Vec<GetPostsFilter>,
+}
+
+#[derive(Deserialize)]
+enum GetPostsFilter {
+    /// Posts that match target status.
+    Acception(PostAcceptationStatus),
+    /// Posts published by target account.
+    Account(u64),
+    After(NaiveDate),
+    Before(NaiveDate),
+    /// Posts which thier title and description contains target keywords.
+    Keyword(String),
+}
+
+impl GetPostsFilter {
+    /// If the target post matches this filter and the target account has enough permission to get the post.
+    fn matches(&self, post: &Post, user: &Account) -> bool {
+        let date = Utc::now().date_naive();
+        (match self {
+            GetPostsFilter::Acception(status) => {
+                post.status.back().map_or(false, |s| &s.status == status)
+            }
+            GetPostsFilter::Account(account) => &post.publisher == account,
+            GetPostsFilter::Before(d) => &post.metadata.time_range.0 <= d,
+            GetPostsFilter::After(d) => &post.metadata.time_range.0 >= d,
+            GetPostsFilter::Keyword(keywords) => {
+                let ks = keywords.split_whitespace();
+                ks.into_iter().all(|k| {
+                    post.metadata.title.contains(k) && post.metadata.description.contains(k)
+                })
+            }
+        }) && (post.publisher == user.id()
+            || (post.metadata.time_range.0 <= date
+                && post.metadata.time_range.1 >= date
+                && user.has_permission(Permission::View))
+            || user.has_permission(Permission::Check))
     }
 }
 
@@ -388,7 +449,7 @@ pub async fn edit_post(mut req: Request<()>) -> tide::Result {
                                     return Ok::<tide::Response, tide::Error>(
                                         json!({
                                             "status": "error",
-                                            "error": format!("Error occured with post {id}: {err}"),
+                                            "error": format!("Error occured with post variant {id}: {err}"),
                                         })
                                         .into(),
                                     );
@@ -537,4 +598,105 @@ impl EditPostVariant {
         }
         None
     }
+}
+
+pub async fn get_posts_info(mut req: Request<()>) -> tide::Result {
+    let cxt = match RequirePermissionContext::from_header(&req) {
+        Some(e) => e,
+        None => {
+            return Ok::<tide::Response, tide::Error>(
+                json!({
+                    "status": "error",
+                    "error": "Permission denied",
+                })
+                .into(),
+            )
+        }
+    };
+    let descriptor: GetPostsInfoDescriptor = req.body_json().await?;
+    match cxt.valid(vec![Permission::Post]).await {
+        Ok(able) => {
+            if able {
+                let am = account::INSTANCE.inner().read().await;
+                let ar = am
+                    .get(
+                        *account::INSTANCE
+                            .index()
+                            .read()
+                            .await
+                            .get(&cxt.user_id)
+                            .unwrap(),
+                    )
+                    .unwrap()
+                    .read()
+                    .await;
+                let mut results = Vec::new();
+                let posts = super::INSTANCE.posts.read().await;
+                let date = Utc::now().date_naive();
+                for p in descriptor.posts.iter() {
+                    for e in posts.iter() {
+                        let er = e.read().await;
+                        if er.id == *p {
+                            if er.publisher == cxt.user_id || ar.has_permission(Permission::Check) {
+                                results.push(GetPostInfoResult::Full(er.clone()))
+                            } else if er.metadata.time_range.0 <= date
+                                && er.metadata.time_range.1 >= date
+                                && ar.has_permission(Permission::View)
+                            {
+                                results.push(GetPostInfoResult::Forigen {
+                                    id: er.id,
+                                    images: er.images.clone(),
+                                    title: er.metadata.title.clone(),
+                                })
+                            } else {
+                                results.push(GetPostInfoResult::PermissionDenied(er.id))
+                            }
+                            break;
+                        }
+                    }
+                }
+                Ok::<tide::Response, tide::Error>(
+                    json!({
+                        "status": "success",
+                        "results": results,
+                    })
+                    .into(),
+                )
+            } else {
+                Ok::<tide::Response, tide::Error>(
+                    json!({
+                        "status": "error",
+                        "error": "Permission denied",
+                    })
+                    .into(),
+                )
+            }
+        }
+        Err(err) => Ok::<tide::Response, tide::Error>(
+            json!({
+                "status": "error",
+                "error": err.to_string(),
+            })
+            .into(),
+        ),
+    }
+}
+
+#[derive(Deserialize)]
+struct GetPostsInfoDescriptor {
+    posts: Vec<u64>,
+}
+
+#[derive(Serialize)]
+enum GetPostInfoResult {
+    Full(Post),
+    Forigen {
+        id: u64,
+        images: Vec<u64>,
+        title: String,
+    },
+    PermissionDenied(
+        /// Post id
+        u64,
+    ),
 }
