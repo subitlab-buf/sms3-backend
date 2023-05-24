@@ -1,0 +1,29 @@
+[package]
+name = "sms3rs-backend"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tide = "0.16.0"
+async-std = { version = "1.12.0", features = ["attributes"] }
+serde = { version = "1.0", features = ["derive"] }
+lettre = { version = "0.10.0", default-features = false, features = [
+    "serde",
+    "async-std1-rustls-tls",
+    "smtp-transport",
+    "pool",
+    "hostname",
+    "builder",
+] }
+chrono = { version = "0.4", features = ["serde"] }
+once_cell = "*"
+rand = "*"
+serde_json = "*"
+toml = "0.7"
+sha256 = "*"
+image = "0.24"
+
+[dev-dependencies]
+tide-testing = "0.1"
