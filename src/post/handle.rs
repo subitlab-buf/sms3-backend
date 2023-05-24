@@ -5,6 +5,7 @@ use crate::account::Account;
 use crate::account::Permission;
 use crate::post::cache::PostImageCache;
 use crate::RequirePermissionContext;
+use async_std::io::BufReader;
 use chrono::Days;
 use chrono::NaiveDate;
 use chrono::Utc;
@@ -16,7 +17,9 @@ use std::ops::Deref;
 use std::sync::atomic;
 use tide::log::error;
 use tide::prelude::*;
+use tide::Body;
 use tide::Request;
+use tide::StatusCode;
 
 /// Read and store a cache image with cache id returned.
 pub async fn cache_image(mut req: Request<()>) -> tide::Result {
@@ -58,7 +61,7 @@ pub async fn cache_image(mut req: Request<()>) -> tide::Result {
                 Ok::<tide::Response, tide::Error>(
                     json!({
                         "status": "success",
-                        "cache_id": id,
+                        "hash": id,
                     })
                     .into(),
                 )
@@ -80,6 +83,68 @@ pub async fn cache_image(mut req: Request<()>) -> tide::Result {
             .into(),
         ),
     }
+}
+
+/// Get image png bytes from target image cache hash.
+pub async fn get_image(mut req: Request<()>) -> tide::Result {
+    let cxt = match RequirePermissionContext::from_header(&req) {
+        Some(e) => e,
+        None => {
+            return Ok::<tide::Response, tide::Error>(
+                json!({
+                    "status": "error",
+                    "error": "Permission denied",
+                })
+                .into(),
+            )
+        }
+    };
+    let descriptor: GetImageDescriptor = req.body_json().await?;
+    match cxt.valid(vec![Permission::View]).await {
+        Ok(able) => {
+            if able {
+                for img in super::cache::INSTANCE.caches.read().await.iter() {
+                    if img.hash == descriptor.hash {
+                        return Ok::<tide::Response, tide::Error>({
+                            let mut rep = tide::Response::new(StatusCode::Ok);
+                            rep.set_body(Body::from_reader(
+                                match async_std::fs::File::open(format!(
+                                    "./data/images/{}.png",
+                                    img.hash
+                                ))
+                                .await
+                                {
+                                    Ok(e) => BufReader::new(e),
+                                    Err(_) => {
+                                        return Ok::<tide::Response, tide::Error>(
+                                            tide::Response::new(StatusCode::NoContent),
+                                        )
+                                    }
+                                },
+                                None,
+                            ));
+                            rep
+                        });
+                    }
+                }
+                Ok::<tide::Response, tide::Error>(tide::Response::new(StatusCode::NoContent))
+            } else {
+                Ok::<tide::Response, tide::Error>(tide::Response::new(StatusCode::NoContent))
+            }
+        }
+        Err(err) => Ok::<tide::Response, tide::Error>(
+            json!({
+                "status": "error",
+                "error": err.to_string(),
+            })
+            .into(),
+        ),
+    }
+}
+
+#[derive(Deserialize)]
+struct GetImageDescriptor {
+    hash: u64,
 }
 
 pub async fn new_post(mut req: Request<()>) -> tide::Result {
@@ -502,8 +567,17 @@ impl EditPostVariant {
                 let mut posts = super::INSTANCE.posts.write().await;
                 let mut i = None;
                 for post in posts.iter().enumerate() {
-                    if post.1.read().await.id == post_id {
+                    let pr = post.1.read().await;
+                    if pr.id == post_id {
                         i = Some(post.0);
+                        for img_id in pr.images.iter() {
+                            for im in super::cache::INSTANCE.caches.read().await.iter() {
+                                if &im.hash == img_id {
+                                    im.blocked.store(false, atomic::Ordering::Relaxed);
+                                    break;
+                                }
+                            }
+                        }
                         break;
                     }
                 }
