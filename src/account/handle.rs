@@ -94,7 +94,7 @@ pub async fn verify_account(mut req: Request<()>) -> tide::Result {
                 organization,
                 password,
             } => {
-                if {
+                let res = {
                     let a = account.read().await;
                     if a.email() == email {
                         let id = a.id();
@@ -104,7 +104,8 @@ pub async fn verify_account(mut req: Request<()>) -> tide::Result {
                     } else {
                         false
                     }
-                } {
+                };
+                if res {
                     let mut a = account.write().await;
                     if let Err(err) = a.verify(
                         descriptor.code,
@@ -143,7 +144,7 @@ pub async fn verify_account(mut req: Request<()>) -> tide::Result {
                 }
             }
             AccountVerifyVariant::ResetPassword { email, password } => {
-                if {
+                let res = {
                     let a = account.read().await;
                     if a.email() == email {
                         let id = a.id();
@@ -153,7 +154,8 @@ pub async fn verify_account(mut req: Request<()>) -> tide::Result {
                     } else {
                         false
                     }
-                } {
+                };
+                if res {
                     let mut a = account.write().await;
                     if let Err(err) = a.verify(
                         descriptor.code,
@@ -279,15 +281,13 @@ pub async fn logout_account(req: Request<()>) -> tide::Result {
             let b = account_manager.inner().read().await;
             let mut aw = b.get(*index).unwrap().write().await;
             match aw.logout(&cxt.token) {
-                Err(err) => {
-                    return Ok::<tide::Response, tide::Error>(
-                        json!({
-                            "status": "error",
-                            "error": err.to_string(),
-                        })
-                        .into(),
-                    )
-                }
+                Err(err) => Ok::<tide::Response, tide::Error>(
+                    json!({
+                        "status": "error",
+                        "error": err.to_string(),
+                    })
+                    .into(),
+                ),
                 Ok(_) => {
                     if !aw.save() {
                         error!("Error when saving account {}", aw.email());
@@ -429,7 +429,7 @@ pub async fn view_account(req: Request<()>) -> tide::Result {
                         id: a.id(),
                         metadata: a.metadata().unwrap(),
                         permissions: a.permissions(),
-                        registration_time: attributes.registration_time.clone(),
+                        registration_time: attributes.registration_time,
                         registration_ip: attributes.registration_ip.clone(),
                     };
                     Ok(json!({
@@ -731,7 +731,7 @@ pub mod manage {
                             .iter()
                             // Prevent permission overflowing
                             .filter(|e| a.has_permission(**e))
-                            .map(|e| *e)
+                            .copied()
                             .collect(),
                         registration_time: Utc::now(),
                         registration_ip: req.remote().map(|e| e.to_string()),
@@ -850,7 +850,7 @@ pub mod manage {
                                 id: *aid,
                                 metadata: account.metadata().unwrap(),
                                 permissions,
-                                registration_time: attributes.registration_time.clone(),
+                                registration_time: attributes.registration_time,
                                 registration_ip: attributes.registration_ip.clone(),
                             })
                         }

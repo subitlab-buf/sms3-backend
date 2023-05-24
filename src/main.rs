@@ -69,7 +69,7 @@ impl RequirePermissionContext {
             .read()
             .await
             .get(&self.user_id)
-            .map(|e| *e)
+            .copied()
         {
             Some(index) => {
                 account_manager.refresh(self.user_id).await;

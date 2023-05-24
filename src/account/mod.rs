@@ -18,7 +18,7 @@ use std::{
 use tide::log::error;
 
 /// The static instance of accounts.
-pub static INSTANCE: Lazy<AccountManager> = Lazy::new(|| AccountManager::new());
+pub static INSTANCE: Lazy<AccountManager> = Lazy::new(AccountManager::new);
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum AccountError {
@@ -56,7 +56,7 @@ impl Display for AccountError {
             AccountError::DateOutOfRangeError => f.write_str("Date out of range"),
             AccountError::MailSendError(err) => {
                 f.write_str("SMPT error while sending verification mail: ")?;
-                f.write_str(&err)
+                f.write_str(err)
             }
             AccountError::PermissionDeniedError => f.write_str("Permission denied"),
         }
@@ -250,7 +250,7 @@ impl Account {
     pub fn save(&self) -> bool {
         if let Ok(mut file) = File::create(format!("./data/accounts/{}.toml", self.id())) {
             file.write_all(
-                &mut match toml::to_string(&self) {
+                match toml::to_string(&self) {
                     Ok(e) => e,
                     _ => return false,
                 }

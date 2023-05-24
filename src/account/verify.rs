@@ -11,8 +11,7 @@ use serde::{Deserialize, Serialize};
 use sha256::digest;
 use tide::log::info;
 
-pub(super) static SENDER_INSTANCE: Lazy<VerificationSender> =
-    Lazy::new(|| VerificationSender::new());
+pub(super) static SENDER_INSTANCE: Lazy<VerificationSender> = Lazy::new(VerificationSender::new);
 
 /// Represent infos of an unverified object.
 #[derive(Serialize, Deserialize, Debug)]
@@ -32,7 +31,7 @@ impl Context {
             self.email, self.code
         );
         SENDER_INSTANCE
-            .send_verification(&self)
+            .send_verification(self)
             .await
             .map_err(|err| AccountError::MailSendError(err.to_string()))?;
         info!("Verification code for {} sent", self.email);
@@ -86,12 +85,7 @@ impl Tokens {
     /// Remove a target token and return whether the token was be removed successfully.
     pub(super) fn remove(&mut self, token: &str) -> bool {
         let l = self.inner.len();
-        self.inner = self
-            .inner
-            .iter()
-            .filter(|e| e.1 != token)
-            .map(|e| e.clone())
-            .collect();
+        self.inner.retain(|e| e.1 != token);
         l > self.inner.len()
     }
 
@@ -102,12 +96,8 @@ impl Tokens {
 
     /// Remove expired tokens.
     pub fn refresh(&mut self) {
-        self.inner = self
-            .inner
-            .iter()
-            .filter(|e| e.0.map_or(true, |a| a > Utc::now().naive_utc()))
-            .map(|e| e.clone())
-            .collect();
+        self.inner
+            .retain(|e| e.0.map_or(true, |a| a > Utc::now().naive_utc()));
         self.inner.sort_by(|a, b| b.0.cmp(&a.0));
     }
 }

@@ -452,10 +452,9 @@ impl EditPostVariant {
             EditPostVariant::Images(imgs) => {
                 let cache = super::cache::INSTANCE.caches.read().await;
                 for img_id in post.images.iter() {
-                    cache
-                        .iter()
-                        .find(|e| e.hash == *img_id)
-                        .map(|e| e.blocked.store(false, atomic::Ordering::Relaxed));
+                    if let Some(e) = cache.iter().find(|e| e.hash == *img_id) {
+                        e.blocked.store(false, atomic::Ordering::Relaxed)
+                    }
                 }
                 for img_id in imgs.iter() {
                     if !cache.iter().any(|e| e.hash == *img_id) {

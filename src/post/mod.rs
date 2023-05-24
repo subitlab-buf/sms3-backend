@@ -14,7 +14,7 @@ use std::{
     io::{Read, Write},
 };
 
-pub static INSTANCE: Lazy<PostManager> = Lazy::new(|| PostManager::new());
+pub static INSTANCE: Lazy<PostManager> = Lazy::new(PostManager::new);
 
 #[derive(Debug)]
 pub enum PostError {

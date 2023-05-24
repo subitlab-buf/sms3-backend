@@ -13,7 +13,7 @@ use std::{
 };
 use tide::log::error;
 
-pub static INSTANCE: Lazy<CacheManager> = Lazy::new(|| CacheManager::new());
+pub static INSTANCE: Lazy<CacheManager> = Lazy::new(CacheManager::new);
 
 #[derive(Serialize, Deserialize)]
 pub struct PostImageCache {
@@ -30,7 +30,7 @@ pub struct PostImageCache {
 impl PostImageCache {
     /// Create a new cache and its hash from image bytes.
     pub fn new(bytes: &Vec<u8>, uploader: u64) -> Result<(Self, u64), PostError> {
-        let image = image::load_from_memory(&bytes).map_err(|err| PostError::ImageError(err))?;
+        let image = image::load_from_memory(bytes).map_err(PostError::ImageError)?;
         let hash = {
             let mut hasher = DefaultHasher::new();
             bytes.hash(&mut hasher);
@@ -57,7 +57,6 @@ impl PostImageCache {
                         image::ImageFormat::Png,
                     )
                     .is_ok();
-                drop(img);
                 *self.img.write().await.deref_mut() = None;
                 ok
             }
