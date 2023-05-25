@@ -8,12 +8,12 @@ tide = "0.16"
 async-std = { version = "1.12", features = ["attributes"] }
 serde = { version = "1.0", features = ["derive"] }
 lettre = { version = "0.10", default-features = false, features = [
-    "serde",
-    "async-std1-rustls-tls",
-    "smtp-transport",
-    "pool",
-    "hostname",
-    "builder",
+  "serde",
+  "async-std1-rustls-tls",
+  "smtp-transport",
+  "pool",
+  "hostname",
+  "builder",
 ] }
 chrono = { version = "0.4", features = ["serde"] }
 once_cell = "*"
@@ -22,6 +22,7 @@ serde_json = "*"
 toml = "0.7"
 sha256 = "*"
 image = "0.24"
+sms3rs-shared = { version = "*", path = "../sms3rs-shared" }
 
 [dev-dependencies]
 tide-testing = "0.1"

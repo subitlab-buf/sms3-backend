@@ -6,7 +6,6 @@ use crate::account::Permission;
 use crate::post::cache::PostImageCache;
 use crate::RequirePermissionContext;
 use chrono::Days;
-use chrono::NaiveDate;
 use chrono::Utc;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::VecDeque;
@@ -18,6 +17,8 @@ use tide::log::error;
 use tide::prelude::*;
 use tide::Request;
 use tide::StatusCode;
+
+use sms3rs_shared::post::handle::*;
 
 /// Read and store a cache image with cache id returned.
 pub async fn cache_image(mut req: Request<()>) -> tide::Result {
@@ -148,11 +149,6 @@ pub async fn get_image(mut req: Request<()>) -> tide::Result {
     }
 }
 
-#[derive(Deserialize)]
-struct GetImageDescriptor {
-    hash: u64,
-}
-
 pub async fn new_post(mut req: Request<()>) -> tide::Result {
     let cxt = match RequirePermissionContext::from_header(&req) {
         Some(e) => e,
@@ -241,7 +237,7 @@ pub async fn new_post(mut req: Request<()>) -> tide::Result {
                     },
                     publisher: cxt.user_id,
                 };
-                if !post.save() {
+                if !super::save_post(&post) {
                     error!("Error while saving post {}", post.id);
                 }
                 let id = post.id;
@@ -271,14 +267,6 @@ pub async fn new_post(mut req: Request<()>) -> tide::Result {
             .into(),
         ),
     }
-}
-
-#[derive(Deserialize)]
-struct PostDescriptor {
-    title: String,
-    description: String,
-    time_range: (NaiveDate, NaiveDate),
-    images: Vec<u64>,
 }
 
 pub async fn get_posts(mut req: Request<()>) -> tide::Result {
@@ -317,7 +305,7 @@ pub async fn get_posts(mut req: Request<()>) -> tide::Result {
                     if descriptor
                         .filters
                         .iter()
-                        .all(|f| f.matches(pr.deref(), ar.deref()))
+                        .all(|f| matches_get_post_filter(f, pr.deref(), ar.deref()))
                     {
                         posts.push(pr.id);
                     }
@@ -349,46 +337,26 @@ pub async fn get_posts(mut req: Request<()>) -> tide::Result {
     }
 }
 
-#[derive(Deserialize)]
-struct GetPostsDescriptor {
-    filters: Vec<GetPostsFilter>,
-}
-
-#[derive(Deserialize)]
-enum GetPostsFilter {
-    /// Posts that match target status.
-    Accepting(PostAcceptationStatus),
-    /// Posts published by target account.
-    Account(u64),
-    After(NaiveDate),
-    Before(NaiveDate),
-    /// Posts which their title and description contains target keywords.
-    Keyword(String),
-}
-
-impl GetPostsFilter {
-    /// If the target post matches this filter and the target account has enough permission to get the post.
-    fn matches(&self, post: &Post, user: &Account) -> bool {
-        let date = Utc::now().date_naive();
-        (match self {
-            GetPostsFilter::Accepting(status) => {
-                post.status.back().map_or(false, |s| &s.status == status)
-            }
-            GetPostsFilter::Account(account) => &post.publisher == account,
-            GetPostsFilter::Before(d) => &post.metadata.time_range.0 <= d,
-            GetPostsFilter::After(d) => &post.metadata.time_range.0 >= d,
-            GetPostsFilter::Keyword(keywords) => {
-                let ks = keywords.split_whitespace();
-                ks.into_iter().all(|k| {
-                    post.metadata.title.contains(k) && post.metadata.description.contains(k)
-                })
-            }
-        }) && (post.publisher == user.id()
-            || (post.metadata.time_range.0 <= date
-                && post.metadata.time_range.1 >= date
-                && user.has_permission(Permission::View))
-            || user.has_permission(Permission::Check))
-    }
+/// If the target post matches this filter and the target account has enough permission to get the post.
+fn matches_get_post_filter(filter: &GetPostsFilter, post: &Post, user: &Account) -> bool {
+    let date = Utc::now().date_naive();
+    (match filter {
+        GetPostsFilter::Acceptation(status) => {
+            post.status.back().map_or(false, |s| &s.status == status)
+        }
+        GetPostsFilter::Account(account) => &post.publisher == account,
+        GetPostsFilter::Before(d) => &post.metadata.time_range.0 <= d,
+        GetPostsFilter::After(d) => &post.metadata.time_range.0 >= d,
+        GetPostsFilter::Keyword(keywords) => {
+            let ks = keywords.split_whitespace();
+            ks.into_iter()
+                .all(|k| post.metadata.title.contains(k) && post.metadata.description.contains(k))
+        }
+    }) && (post.publisher == user.id()
+        || (post.metadata.time_range.0 <= date
+            && post.metadata.time_range.1 >= date
+            && user.has_permission(Permission::View))
+        || user.has_permission(Permission::Check))
 }
 
 pub async fn edit_post(mut req: Request<()>) -> tide::Result {
@@ -429,7 +397,7 @@ pub async fn edit_post(mut req: Request<()>) -> tide::Result {
                         let id = pr.id;
                         drop(pr);
                         for variant in descriptor.variants.iter() {
-                            match variant.apply(id, cxt.user_id).await {
+                            match apply_edit_post_variant(variant, id, cxt.user_id).await {
                                 Some(err) => {
                                     return Ok::<tide::Response, tide::Error>(
                                         json!({
@@ -477,138 +445,117 @@ pub async fn edit_post(mut req: Request<()>) -> tide::Result {
     }
 }
 
-#[derive(Deserialize)]
-struct EditPostDescriptor {
-    post: u64,
-    variants: Vec<EditPostVariant>,
-}
-
-#[derive(Deserialize)]
-enum EditPostVariant {
-    Title(String),
-    Description(String),
-    Images(Vec<u64>),
-    TimeRange(NaiveDate, NaiveDate),
-    /// Change status of the post to `Pending`
-    /// if the target status is `Submitted`.
-    CancelSubmission,
-    RequestReview(
-        /// Message to admins.
-        String,
-    ),
-    /// Remove the post and unblock all the images it use.
-    Destroy,
-}
-
-impl EditPostVariant {
-    /// Apply this edition, return an err if error occurs.
-    pub async fn apply(&self, post_id: u64, user_id: u64) -> Option<String> {
-        let posts = super::INSTANCE.posts.read().await;
-        let mut post = match {
-            let mut e = None;
-            for p in posts.iter() {
-                if p.read().await.id == post_id {
-                    e = Some(p.write().await);
+/// Apply this edition, return an err if error occurs.
+pub async fn apply_edit_post_variant(
+    variant: &EditPostVariant,
+    post_id: u64,
+    user_id: u64,
+) -> Option<String> {
+    let posts = super::INSTANCE.posts.read().await;
+    let mut post = match {
+        let mut e = None;
+        for p in posts.iter() {
+            if p.read().await.id == post_id {
+                e = Some(p.write().await);
+                break;
+            }
+        }
+        e
+    } {
+        Some(e) => e,
+        None => return Some("Post not found".to_string()),
+    };
+    match variant {
+        EditPostVariant::Title(value) => post.metadata.title = value.clone(),
+        EditPostVariant::Description(value) => post.metadata.description = value.clone(),
+        EditPostVariant::Images(imgs) => {
+            let cache = super::cache::INSTANCE.caches.read().await;
+            for img_id in post.images.iter() {
+                if let Some(e) = cache.iter().find(|e| e.hash == *img_id) {
+                    e.blocked.store(false, atomic::Ordering::Relaxed)
+                }
+            }
+            for img_id in imgs.iter() {
+                if !cache.iter().any(|e| e.hash == *img_id) {
+                    return Some(format!("Target image cache {} not fount", img_id));
+                }
+            }
+            for img_id in imgs.iter() {
+                cache
+                    .iter()
+                    .find(|e| e.hash == *img_id)
+                    .unwrap()
+                    .blocked
+                    .store(true, atomic::Ordering::Relaxed)
+            }
+        }
+        EditPostVariant::TimeRange(start, end) => {
+            if start
+                .checked_add_days(Days::new(7))
+                .map_or(false, |e| &e > end)
+            {
+                return Some("Post time out of range".to_string());
+            }
+            post.metadata.time_range = (*start, *end);
+        }
+        EditPostVariant::CancelSubmission => {
+            if post
+                .status
+                .back()
+                .map_or(true, |e| matches!(e.status, PostAcceptationStatus::Pending))
+            {
+                return Some("Target post was already pended".to_string());
+            }
+            post.status.push_back(super::PostAcceptationData {
+                operator: user_id,
+                status: PostAcceptationStatus::Pending,
+                time: Utc::now(),
+            })
+        }
+        EditPostVariant::Destroy => {
+            if !super::remove_post(post.deref()) {
+                error!("Post {} save failed", post.id);
+            }
+            drop(post);
+            drop(posts);
+            let mut posts = super::INSTANCE.posts.write().await;
+            let mut i = None;
+            for post in posts.iter().enumerate() {
+                let pr = post.1.read().await;
+                if pr.id == post_id {
+                    i = Some(post.0);
+                    for img_id in pr.images.iter() {
+                        for im in super::cache::INSTANCE.caches.read().await.iter() {
+                            if &im.hash == img_id {
+                                im.blocked.store(false, atomic::Ordering::Relaxed);
+                                break;
+                            }
+                        }
+                    }
                     break;
                 }
             }
-            e
-        } {
-            Some(e) => e,
-            None => return Some("Post not found".to_string()),
-        };
-        match self {
-            EditPostVariant::Title(value) => post.metadata.title = value.clone(),
-            EditPostVariant::Description(value) => post.metadata.description = value.clone(),
-            EditPostVariant::Images(imgs) => {
-                let cache = super::cache::INSTANCE.caches.read().await;
-                for img_id in post.images.iter() {
-                    if let Some(e) = cache.iter().find(|e| e.hash == *img_id) {
-                        e.blocked.store(false, atomic::Ordering::Relaxed)
-                    }
+            match i {
+                Some(e) => {
+                    posts.remove(e);
                 }
-                for img_id in imgs.iter() {
-                    if !cache.iter().any(|e| e.hash == *img_id) {
-                        return Some(format!("Target image cache {} not fount", img_id));
-                    }
-                }
-                for img_id in imgs.iter() {
-                    cache
-                        .iter()
-                        .find(|e| e.hash == *img_id)
-                        .unwrap()
-                        .blocked
-                        .store(true, atomic::Ordering::Relaxed)
-                }
-            }
-            EditPostVariant::TimeRange(start, end) => {
-                if start
-                    .checked_add_days(Days::new(7))
-                    .map_or(false, |e| &e > end)
-                {
-                    return Some("Post time out of range".to_string());
-                }
-                post.metadata.time_range = (*start, *end);
-            }
-            EditPostVariant::CancelSubmission => {
-                if post
-                    .status
-                    .back()
-                    .map_or(true, |e| matches!(e.status, PostAcceptationStatus::Pending))
-                {
-                    return Some("Target post was already pended".to_string());
-                }
-                post.status.push_back(super::PostAcceptationData {
-                    operator: user_id,
-                    status: PostAcceptationStatus::Pending,
-                    time: Utc::now(),
-                })
-            }
-            EditPostVariant::Destroy => {
-                if !post.remove() {
-                    error!("Post {} save failed", post.id);
-                }
-                drop(post);
-                drop(posts);
-                let mut posts = super::INSTANCE.posts.write().await;
-                let mut i = None;
-                for post in posts.iter().enumerate() {
-                    let pr = post.1.read().await;
-                    if pr.id == post_id {
-                        i = Some(post.0);
-                        for img_id in pr.images.iter() {
-                            for im in super::cache::INSTANCE.caches.read().await.iter() {
-                                if &im.hash == img_id {
-                                    im.blocked.store(false, atomic::Ordering::Relaxed);
-                                    break;
-                                }
-                            }
-                        }
-                        break;
-                    }
-                }
-                match i {
-                    Some(e) => {
-                        posts.remove(e);
-                    }
-                    None => return Some("Post not found".to_string()),
-                }
-            }
-            EditPostVariant::RequestReview(msg) => {
-                if post.status.back().map_or(true, |e| {
-                    matches!(e.status, PostAcceptationStatus::Submitted(_))
-                }) {
-                    return Some("Target post was already submitted".to_string());
-                }
-                post.status.push_back(super::PostAcceptationData {
-                    operator: user_id,
-                    status: PostAcceptationStatus::Submitted(msg.clone()),
-                    time: Utc::now(),
-                })
+                None => return Some("Post not found".to_string()),
             }
         }
-        None
+        EditPostVariant::RequestReview(msg) => {
+            if post.status.back().map_or(true, |e| {
+                matches!(e.status, PostAcceptationStatus::Submitted(_))
+            }) {
+                return Some("Target post was already submitted".to_string());
+            }
+            post.status.push_back(super::PostAcceptationData {
+                operator: user_id,
+                status: PostAcceptationStatus::Submitted(msg.clone()),
+                time: Utc::now(),
+            })
+        }
     }
+    None
 }
 
 pub async fn get_posts_info(mut req: Request<()>) -> tide::Result {
@@ -696,25 +643,6 @@ pub async fn get_posts_info(mut req: Request<()>) -> tide::Result {
             .into(),
         ),
     }
-}
-
-#[derive(Deserialize)]
-struct GetPostsInfoDescriptor {
-    posts: Vec<u64>,
-}
-
-#[derive(Serialize)]
-enum GetPostInfoResult {
-    Full(Post),
-    Foreign {
-        id: u64,
-        images: Vec<u64>,
-        title: String,
-    },
-    NotFound(
-        /// Target post id
-        u64,
-    ),
 }
 
 pub async fn approve_post(mut req: Request<()>) -> tide::Result {
@@ -830,22 +758,4 @@ pub async fn approve_post(mut req: Request<()>) -> tide::Result {
             .into(),
         ),
     }
-}
-
-#[derive(Deserialize)]
-struct ApprovePostDescriptor {
-    post: u64,
-    variant: ApprovePostVariant,
-}
-
-#[derive(Deserialize)]
-enum ApprovePostVariant {
-    Accept(
-        /// Message
-        Option<String>,
-    ),
-    Reject(
-        /// Message, should not be empty.
-        String,
-    ),
 }

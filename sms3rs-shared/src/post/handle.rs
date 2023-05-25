@@ -73,13 +73,13 @@ pub enum GetPostInfoResult {
 }
 
 #[derive(Serialize, Deserialize)]
-struct ApprovePostDescriptor {
-    post: u64,
-    variant: ApprovePostVariant,
+pub struct ApprovePostDescriptor {
+    pub post: u64,
+    pub variant: ApprovePostVariant,
 }
 
 #[derive(Serialize, Deserialize)]
-enum ApprovePostVariant {
+pub enum ApprovePostVariant {
     Accept(
         /// Message
         Option<String>,

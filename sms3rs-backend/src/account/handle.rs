@@ -1,19 +1,14 @@
 use super::AccountError;
-use super::House;
-use super::Permissions;
 use super::UserAttributes;
-use super::UserMetadata;
 use super::UserVerifyVariant;
 use crate::account::verify;
 use crate::account::Permission;
 use crate::account::{Account, AccountManagerError};
 use crate::RequirePermissionContext;
 use async_std::sync::RwLock;
-use chrono::DateTime;
 use chrono::Duration;
 use chrono::Utc;
 use rand::Rng;
-use serde::Deserialize;
 use sha256::digest;
 use std::ops::Deref;
 use std::ops::DerefMut;
@@ -21,6 +16,8 @@ use tide::log::error;
 use tide::log::info;
 use tide::prelude::*;
 use tide::Request;
+
+use sms3rs_shared::account::handle::*;
 
 /// Create an unverified account.
 pub async fn create_account(mut req: Request<()>) -> tide::Result {
@@ -72,11 +69,6 @@ pub async fn create_account(mut req: Request<()>) -> tide::Result {
         })
         .into(),
     )
-}
-
-#[derive(Deserialize)]
-struct AccountCreateDescriptor {
-    email: lettre::Address,
 }
 
 /// Verify an account.
@@ -192,31 +184,6 @@ pub async fn verify_account(mut req: Request<()>) -> tide::Result {
     )
 }
 
-#[derive(Deserialize)]
-struct AccountVerifyDescriptor {
-    code: u32,
-    variant: AccountVerifyVariant,
-}
-
-#[derive(Deserialize)]
-enum AccountVerifyVariant {
-    /// Activate an unverified account.
-    Activate {
-        email: lettre::Address,
-        name: String,
-        id: u32,
-        phone: u64,
-        house: Option<House>,
-        organization: Option<String>,
-        password: String,
-    },
-    /// Verify a resetpassword session.
-    ResetPassword {
-        email: lettre::Address,
-        password: String,
-    },
-}
-
 /// Login to a verified account.
 pub async fn login_account(mut req: Request<()>) -> tide::Result {
     let account_manager = &super::INSTANCE;
@@ -253,12 +220,6 @@ pub async fn login_account(mut req: Request<()>) -> tide::Result {
         })
         .into(),
     )
-}
-
-#[derive(Deserialize)]
-struct AccountLoginDescriptor {
-    email: lettre::Address,
-    password: String,
 }
 
 /// Logout from an account.
@@ -386,12 +347,6 @@ pub async fn sign_out_account(mut req: Request<()>) -> tide::Result {
     }
 }
 
-#[derive(Deserialize)]
-struct AccountSignOutDescriptor {
-    /// For double-verifying.
-    password: String,
-}
-
 /// Get a user's account details.
 pub async fn view_account(req: Request<()>) -> tide::Result {
     let account_manager = &super::INSTANCE;
@@ -450,15 +405,6 @@ pub async fn view_account(req: Request<()>) -> tide::Result {
     }
 }
 
-#[derive(Serialize)]
-struct ViewAccountResult {
-    id: u64,
-    metadata: UserMetadata,
-    permissions: Permissions,
-    registration_time: DateTime<Utc>,
-    registration_ip: Option<String>,
-}
-
 /// Edit account metadata.
 pub async fn edit_account(mut req: Request<()>) -> tide::Result {
     let account_manager = &super::INSTANCE;
@@ -491,7 +437,7 @@ pub async fn edit_account(mut req: Request<()>) -> tide::Result {
                 .write()
                 .await;
             for variant in descriptor.variants {
-                match variant.apply(a.deref_mut()) {
+                match apply_metadata_type(variant, a.deref_mut()) {
                     Ok(_) => (),
                     Err(err) => {
                         return Ok::<tide::Response, tide::Error>(
@@ -524,46 +470,31 @@ pub async fn edit_account(mut req: Request<()>) -> tide::Result {
     }
 }
 
-#[derive(Deserialize)]
-struct AccountEditDescriptor {
-    variants: Vec<AccountEditMetadataType>,
-}
-
-#[derive(Deserialize)]
-enum AccountEditMetadataType {
-    Name(String),
-    SchoolId(u32),
-    Phone(u64),
-    House(Option<House>),
-    Organization(Option<String>),
-    Password { old: String, new: String },
-    TokenExpireTime(u16),
-}
-
-impl AccountEditMetadataType {
-    pub fn apply(self, account: &mut Account) -> Result<(), AccountError> {
-        match account {
-            Account::Unverified(_) => return Err(AccountError::UserUnverifiedError),
-            Account::Verified { attributes, .. } => match self {
-                AccountEditMetadataType::Name(name) => attributes.name = name,
-                AccountEditMetadataType::SchoolId(id) => attributes.school_id = id,
-                AccountEditMetadataType::Phone(phone) => attributes.phone = phone,
-                AccountEditMetadataType::House(house) => attributes.house = house,
-                AccountEditMetadataType::Organization(org) => attributes.organization = org,
-                AccountEditMetadataType::Password { old, new } => {
-                    if attributes.password_sha == digest(old) {
-                        attributes.password_sha = digest(new)
-                    } else {
-                        return Err(AccountError::PasswordIncorrectError);
-                    }
+pub fn apply_metadata_type(
+    mt: AccountEditMetadataType,
+    account: &mut Account,
+) -> Result<(), AccountError> {
+    match account {
+        Account::Unverified(_) => return Err(AccountError::UserUnverifiedError),
+        Account::Verified { attributes, .. } => match mt {
+            AccountEditMetadataType::Name(name) => attributes.name = name,
+            AccountEditMetadataType::SchoolId(id) => attributes.school_id = id,
+            AccountEditMetadataType::Phone(phone) => attributes.phone = phone,
+            AccountEditMetadataType::House(house) => attributes.house = house,
+            AccountEditMetadataType::Organization(org) => attributes.organization = org,
+            AccountEditMetadataType::Password { old, new } => {
+                if attributes.password_sha == digest(old) {
+                    attributes.password_sha = digest(new)
+                } else {
+                    return Err(AccountError::PasswordIncorrectError);
                 }
-                AccountEditMetadataType::TokenExpireTime(time) => {
-                    attributes.token_expiration_time = time
-                }
-            },
-        }
-        Ok(())
+            }
+            AccountEditMetadataType::TokenExpireTime(time) => {
+                attributes.token_expiration_time = time
+            }
+        },
     }
+    Ok(())
 }
 
 /// Initialize a reset password verification.
@@ -651,20 +582,14 @@ pub async fn reset_password(mut req: Request<()>) -> tide::Result {
     .into())
 }
 
-#[derive(Deserialize)]
-struct ResetPasswordDescriptor {
-    email: lettre::Address,
-}
-
 /// Manage accounts for admins.
 pub mod manage {
     use crate::account::verify::Tokens;
-    use crate::account::{self, AccountError, House, Permission, Permissions};
+    use crate::account::{self, AccountError, Permission};
     use crate::account::{Account, UserAttributes};
     use crate::RequirePermissionContext;
     use async_std::sync::RwLock;
     use chrono::Utc;
-    use serde::Deserialize;
     use sha256::digest;
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
@@ -672,6 +597,8 @@ pub mod manage {
     use tide::log::{error, info};
     use tide::prelude::*;
     use tide::Request;
+
+    use sms3rs_shared::account::handle::manage::*;
 
     /// Let admin creating accounts.
     pub async fn make_account(mut req: Request<()>) -> tide::Result {
@@ -783,18 +710,6 @@ pub mod manage {
         }
     }
 
-    #[derive(Deserialize)]
-    struct MakeAccountDescriptor {
-        email: lettre::Address,
-        name: String,
-        school_id: u32,
-        phone: u64,
-        house: Option<House>,
-        organization: Option<String>,
-        password: String,
-        permissions: Permissions,
-    }
-
     /// View an account.
     pub async fn view_account(mut req: Request<()>) -> tide::Result {
         let account_manager = &account::INSTANCE;
@@ -874,17 +789,6 @@ pub mod manage {
         }
     }
 
-    #[derive(Deserialize)]
-    struct ViewAccountDescriptor {
-        accounts: Vec<u64>,
-    }
-
-    #[derive(Serialize)]
-    enum ViewAccountResult {
-        Err { id: u64, error: String },
-        Ok(super::ViewAccountResult),
-    }
-
     /// Modify an account from admin side.
     pub async fn modify_account(mut req: Request<()>) -> tide::Result {
         let account_manager = &account::INSTANCE;
@@ -946,7 +850,7 @@ pub mod manage {
                     );
                 }
                 for variant in descriptor.variants {
-                    match variant.apply(a.deref_mut(), &context).await {
+                    match apply_account_modify_type(variant, a.deref_mut(), &context).await {
                         Ok(_) => continue,
                         Err(err) => {
                             return Ok::<tide::Response, tide::Error>(
@@ -979,47 +883,28 @@ pub mod manage {
         }
     }
 
-    #[derive(Deserialize)]
-    struct AccountModifyDescriptor {
-        account_id: u64,
-        variants: Vec<AccountModifyType>,
-    }
-
-    #[derive(Deserialize)]
-    enum AccountModifyType {
-        Email(lettre::Address),
-        Name(String),
-        SchoolId(u32),
-        Phone(u64),
-        House(Option<House>),
-        Organization(Option<String>),
-        Permission(Permissions),
-    }
-
-    impl AccountModifyType {
-        pub async fn apply(
-            self,
-            account: &mut Account,
-            context: &RequirePermissionContext,
-        ) -> Result<(), AccountError> {
-            match account {
-                Account::Unverified(_) => return Err(AccountError::UserUnverifiedError),
-                Account::Verified { attributes, .. } => match self {
-                    AccountModifyType::Name(name) => attributes.name = name,
-                    AccountModifyType::SchoolId(id) => attributes.school_id = id,
-                    AccountModifyType::Phone(phone) => attributes.phone = phone,
-                    AccountModifyType::House(house) => attributes.house = house,
-                    AccountModifyType::Organization(org) => attributes.organization = org,
-                    AccountModifyType::Email(email) => attributes.email = email,
-                    AccountModifyType::Permission(permissions) => {
-                        if !context.valid(permissions.clone()).await.unwrap_or(false) {
-                            return Err(AccountError::PermissionDeniedError);
-                        }
-                        attributes.permissions = permissions
+    async fn apply_account_modify_type(
+        mt: AccountModifyType,
+        account: &mut Account,
+        context: &RequirePermissionContext,
+    ) -> Result<(), AccountError> {
+        match account {
+            Account::Unverified(_) => return Err(AccountError::UserUnverifiedError),
+            Account::Verified { attributes, .. } => match mt {
+                AccountModifyType::Name(name) => attributes.name = name,
+                AccountModifyType::SchoolId(id) => attributes.school_id = id,
+                AccountModifyType::Phone(phone) => attributes.phone = phone,
+                AccountModifyType::House(house) => attributes.house = house,
+                AccountModifyType::Organization(org) => attributes.organization = org,
+                AccountModifyType::Email(email) => attributes.email = email,
+                AccountModifyType::Permission(permissions) => {
+                    if !context.valid(permissions.clone()).await.unwrap_or(false) {
+                        return Err(AccountError::PermissionDeniedError);
                     }
-                },
-            }
-            Ok(())
+                    attributes.permissions = permissions
+                }
+            },
         }
+        Ok(())
     }
 }

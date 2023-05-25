@@ -15,6 +15,8 @@ use std::{
 };
 use tide::log::error;
 
+pub use sms3rs_shared::account::*;
+
 /// The static instance of accounts.
 pub static INSTANCE: Lazy<AccountManager> = Lazy::new(AccountManager::new);
 
@@ -297,18 +299,7 @@ pub enum UserVerifyVariant {
     ForgetPassword(verify::Context),
 }
 
-/// Represents a user's metadata.
-#[derive(Serialize, Deserialize)]
-pub struct UserMetadata {
-    pub email: lettre::Address,
-    pub name: String,
-    pub school_id: u32,
-    pub phone: u64,
-    pub house: Option<House>,
-    pub organization: Option<String>,
-}
-
-/// Attributes of a registered user.
+// Attributes of a registered user.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct UserAttributes {
     /// Email address of this user.
@@ -334,41 +325,6 @@ pub struct UserAttributes {
     /// The expiration time of a token in days.
     /// `0` means never expire.
     token_expiration_time: u16,
-}
-
-/// Represents houses of PKUSchool.
-#[derive(Clone, Copy, Serialize, Deserialize, Debug)]
-pub enum House {
-    GeWu,
-    ZhiZhi,
-    ChengYi,
-    ZhengXin,
-    MingDe,
-    HongYi,
-    XiJing,
-    XinMin,
-    ZhiShan,
-}
-
-pub type Permissions = Vec<Permission>;
-
-/// Represent permissions an account has.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
-pub enum Permission {
-    /// View approved and currently active posters.
-    View,
-    /// Post posters for approval.
-    Post,
-    /// View all posters, including archived and unapproved.
-    Check,
-    /// Approve posters or edit approvals.
-    Approve,
-    /// View accounts.
-    ViewAccounts,
-    /// Manage accounts.
-    ManageAccounts,
-    /// The top OP permission. No usage.
-    OP,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

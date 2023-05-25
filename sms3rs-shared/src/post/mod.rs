@@ -1,8 +1,7 @@
 pub mod handle;
 
-use std::collections::VecDeque;
-
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 
 /// Represents a post posted by a user.
 #[derive(Serialize, Deserialize, Debug, Clone)]
