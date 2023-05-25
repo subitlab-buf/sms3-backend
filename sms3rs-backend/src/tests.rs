@@ -13,6 +13,8 @@ async fn reset_all() {
 #[serial]
 #[async_std::test]
 async fn account_registry() {
+    reset_all().await;
+
     let mut app = tide::new();
     app.at("/api/account/create")
         .post(crate::account::handle::create_account);
@@ -34,15 +36,15 @@ async fn account_registry() {
             .await
             .unwrap();
 
-        assert!(
+        assert_eq!(
             response_json
                 .as_object()
                 .unwrap()
                 .get("status")
                 .unwrap()
                 .as_str()
-                .unwrap()
-                == "success"
+                .unwrap(),
+            "success"
         );
     }
 
@@ -72,15 +74,15 @@ async fn account_registry() {
             .await
             .unwrap();
 
-        assert!(
+        assert_ne!(
             response_json
                 .as_object()
                 .unwrap()
                 .get("status")
                 .unwrap()
                 .as_str()
-                .unwrap()
-                != "success"
+                .unwrap(),
+            "success"
         )
     }
 
@@ -110,25 +112,25 @@ async fn account_registry() {
             .await
             .unwrap();
 
-        assert!(
+        assert_eq!(
             response_json
                 .as_object()
                 .unwrap()
                 .get("status")
                 .unwrap()
                 .as_str()
-                .unwrap()
-                == "success"
+                .unwrap(),
+            "success"
         )
     }
-
-    reset_all().await;
 }
 
-/// Login, logout and signout an account.
+/// Login, logout an account and test for `RequirePermissionContext`.
 #[serial]
 #[async_std::test]
 async fn account_logging() {
+    reset_all().await;
+
     let mut app = tide::new();
     app.at("/api/account/login")
         .post(crate::account::handle::login_account);
@@ -161,6 +163,8 @@ async fn account_logging() {
         })
         .await;
 
+    let token;
+
     {
         use sms3rs_shared::account::handle::AccountLoginDescriptor;
 
@@ -186,8 +190,67 @@ async fn account_logging() {
                 .as_str()
                 .unwrap()
                 == "success"
-        )
+        );
+
+        assert_eq!(
+            response_json
+                .as_object()
+                .unwrap()
+                .get("account_id")
+                .unwrap()
+                .as_u64()
+                .unwrap(),
+            account_id
+        );
+
+        token = response_json
+            .as_object()
+            .unwrap()
+            .get("token")
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .to_string();
     }
 
-    reset_all().await;
+    {
+        let cxt = crate::RequirePermissionContext {
+            token: token.to_string(),
+            user_id: account_id,
+        };
+
+        // Test `RequirePermissionContext`
+        assert!(cxt.valid(vec![]).await.unwrap());
+        assert!(!cxt
+            .valid(vec![sms3rs_shared::account::Permission::OP])
+            .await
+            .unwrap());
+    }
+
+    {
+        let response_json: serde_json::Value = app
+            .post("/api/account/logout")
+            .header("Token", token.to_string())
+            .header("AccountId", account_id.to_string())
+            .recv_json()
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response_json
+                .as_object()
+                .unwrap()
+                .get("status")
+                .unwrap()
+                .as_str()
+                .unwrap(),
+            "success"
+        );
+
+        let cxt = crate::RequirePermissionContext {
+            token: token.to_string(),
+            user_id: account_id,
+        };
+        assert!(!cxt.valid(vec![]).await.unwrap());
+    }
 }

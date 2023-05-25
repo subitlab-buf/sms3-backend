@@ -201,7 +201,7 @@ pub async fn login_account(mut req: Request<()>) -> tide::Result {
                     info!("Account {} (id: {}) logged in", aw.email(), aw.id());
                     json!({
                         "status": "success",
-                        "user_id": aw.id(),
+                        "account_id": aw.id(),
                         "token": t,
                     })
                 }
