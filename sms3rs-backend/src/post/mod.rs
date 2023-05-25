@@ -1,4 +1,4 @@
-mod cache;
+pub(crate) mod cache;
 pub mod handle;
 
 use async_std::sync::RwLock;
@@ -121,5 +121,12 @@ impl PostManager {
             }
         }
         false
+    }
+
+    #[cfg(test)]
+    pub async fn reset(&self) {
+        use std::ops::DerefMut;
+
+        *self.posts.write().await.deref_mut() = Vec::new();
     }
 }

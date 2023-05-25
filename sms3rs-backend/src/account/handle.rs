@@ -130,6 +130,7 @@ pub async fn verify_account(mut req: Request<()>) -> tide::Result {
                     return Ok::<tide::Response, tide::Error>(
                         json!({
                             "status": "success",
+                            "account_id": a.id(),
                         })
                         .into(),
                     );

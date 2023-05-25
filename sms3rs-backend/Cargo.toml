@@ -26,3 +26,5 @@ sms3rs-shared = { version = "*", path = "../sms3rs-shared" }
 
 [dev-dependencies]
 tide-testing = "0.1"
+serial_test = "*"
+

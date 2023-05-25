@@ -303,28 +303,28 @@ pub enum UserVerifyVariant {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct UserAttributes {
     /// Email address of this user.
-    email: lettre::Address,
+    pub email: lettre::Address,
     /// Name of this user.
-    name: String,
+    pub name: String,
     /// School id of this user (ex. 2522xxx).
-    school_id: u32,
+    pub school_id: u32,
     /// Phone number of this user.
-    phone: u64,
+    pub phone: u64,
     /// House this student belongs to. Can be `None`.
-    house: Option<House>,
+    pub house: Option<House>,
     /// Organization this user belongs to. Can be `None`.
-    organization: Option<String>,
+    pub organization: Option<String>,
     /// Permissions this user has.
-    permissions: Permissions,
+    pub permissions: Permissions,
     /// The registration time of this user.
-    registration_time: DateTime<Utc>,
+    pub registration_time: DateTime<Utc>,
     /// The registration ip of this user.
-    registration_ip: Option<String>,
+    pub registration_ip: Option<String>,
     /// Hash of this user's password.
-    password_sha: String,
+    pub password_sha: String,
     /// The expiration time of a token in days.
     /// `0` means never expire.
-    token_expiration_time: u16,
+    pub token_expiration_time: u16,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -520,5 +520,11 @@ impl AccountManager {
             .insert(account.id(), self.accounts.read().await.len())
             .is_none());
         self.accounts.write().await.push(RwLock::new(account));
+    }
+
+    #[cfg(test)]
+    pub async fn reset(&self) {
+        *self.accounts.write().await.deref_mut() = Vec::new();
+        *self.index.write().await.deref_mut() = HashMap::new();
     }
 }

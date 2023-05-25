@@ -166,4 +166,9 @@ impl CacheManager {
         }
         self.caches.write().await.push(cache);
     }
+
+    #[cfg(test)]
+    pub async fn reset(&self) {
+        *self.caches.write().await.deref_mut() = Vec::new();
+    }
 }
