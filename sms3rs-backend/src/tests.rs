@@ -9,7 +9,7 @@ async fn reset_all() {
     crate::post::cache::INSTANCE.reset().await;
 }
 
-/// Create an account and verify it.
+/// Test: create an account and verify it.
 #[serial]
 #[async_std::test]
 async fn account_registry() {
@@ -125,19 +125,15 @@ async fn account_registry() {
     }
 }
 
-/// Login, logout an account and test for `RequirePermissionContext`.
+/// Test for logging in an account.
 #[serial]
 #[async_std::test]
-async fn account_logging() {
+async fn account_login() {
     reset_all().await;
 
     let mut app = tide::new();
     app.at("/api/account/login")
         .post(crate::account::handle::login_account);
-    app.at("/api/account/logout")
-        .post(crate::account::handle::logout_account);
-    app.at("/api/account/signout")
-        .post(crate::account::handle::sign_out_account);
 
     let account_id = 123456;
     let password = "password123456";
@@ -165,73 +161,280 @@ async fn account_logging() {
 
     let token;
 
-    {
-        use sms3rs_shared::account::handle::AccountLoginDescriptor;
+    use sms3rs_shared::account::handle::AccountLoginDescriptor;
 
-        let descriptor = AccountLoginDescriptor {
-            email: lettre::Address::new("yujiening2025", "i.pkuschool.edu.cn").unwrap(),
-            password: password.to_string(),
+    let descriptor = AccountLoginDescriptor {
+        email: lettre::Address::new("yujiening2025", "i.pkuschool.edu.cn").unwrap(),
+        password: password.to_string(),
+    };
+
+    let response_json: serde_json::Value = app
+        .post("/api/account/login")
+        .body_json(&descriptor)
+        .unwrap()
+        .recv_json()
+        .await
+        .unwrap();
+
+    assert!(
+        response_json
+            .as_object()
+            .unwrap()
+            .get("status")
+            .unwrap()
+            .as_str()
+            .unwrap()
+            == "success"
+    );
+
+    assert_eq!(
+        response_json
+            .as_object()
+            .unwrap()
+            .get("account_id")
+            .unwrap()
+            .as_u64()
+            .unwrap(),
+        account_id
+    );
+
+    token = response_json
+        .as_object()
+        .unwrap()
+        .get("token")
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let cxt = crate::RequirePermissionContext {
+        token: token.to_string(),
+        user_id: account_id,
+    };
+
+    assert!(cxt.valid(vec![]).await.unwrap());
+}
+
+/// Test for usage of `RequirePermissionContext`
+#[serial]
+#[async_std::test]
+async fn require_permission_context() {
+    reset_all().await;
+
+    let account_id = 123456;
+
+    {
+        let password = "password123456";
+        let token;
+
+        crate::account::INSTANCE
+            .push(crate::account::Account::Verified {
+                id: account_id,
+                attributes: crate::account::UserAttributes {
+                    email: lettre::Address::new("yujiening2025", "i.pkuschool.edu.cn").unwrap(),
+                    name: "Yu Jiening".to_string(),
+                    school_id: 2522320,
+                    house: Some(sms3rs_shared::account::House::ZhiZhi),
+                    phone: 16601550826,
+                    organization: None,
+                    permissions: vec![],
+                    registration_time: chrono::Utc::now(),
+                    registration_ip: Some("127.0.0.1".to_string()),
+                    password_sha: digest(password.to_string()),
+                    token_expiration_time: 0,
+                },
+                tokens: {
+                    let mut t = crate::account::verify::Tokens::new();
+                    token = t.new_token(account_id, 0);
+                    t
+                },
+                verify: crate::account::UserVerifyVariant::None,
+            })
+            .await;
+
+        let cxt = crate::RequirePermissionContext {
+            token: token.to_string(),
+            user_id: account_id,
         };
 
+        assert!(cxt.valid(vec![]).await.unwrap());
+        assert!(!cxt
+            .valid(vec![sms3rs_shared::account::Permission::OP])
+            .await
+            .unwrap());
+
+        let cxt_wrong = crate::RequirePermissionContext {
+            token: "wrongtoken".to_string(),
+            user_id: account_id,
+        };
+
+        assert!(!cxt_wrong.valid(vec![]).await.unwrap());
+    }
+
+    {
+        crate::account::INSTANCE
+            .push(crate::account::Account::Unverified(
+                crate::account::verify::Context {
+                    email: lettre::Address::new("yujiening2025", "i.pkuschool.edu.cn").unwrap(),
+                    expire_time: (chrono::Utc::now() + chrono::Days::new(1)).naive_utc(),
+                    code: 6,
+                },
+            ))
+            .await;
+
+        let cxt = crate::RequirePermissionContext {
+            token: 6.to_string(),
+            user_id: account_id,
+        };
+
+        assert!(!cxt.valid(vec![]).await.unwrap_or(true));
+    }
+}
+
+/// Test for logging out an account.
+#[serial]
+#[async_std::test]
+async fn account_logout() {
+    reset_all().await;
+
+    let mut app = tide::new();
+    app.at("/api/account/logout")
+        .post(crate::account::handle::logout_account);
+
+    let account_id = 123456;
+    let password = "password123456";
+
+    let token;
+
+    crate::account::INSTANCE
+        .push(crate::account::Account::Verified {
+            id: account_id,
+            attributes: crate::account::UserAttributes {
+                email: lettre::Address::new("yujiening2025", "i.pkuschool.edu.cn").unwrap(),
+                name: "Yu Jiening".to_string(),
+                school_id: 2522320,
+                house: Some(sms3rs_shared::account::House::ZhiZhi),
+                phone: 16601550826,
+                organization: None,
+                permissions: vec![],
+                registration_time: chrono::Utc::now(),
+                registration_ip: Some("127.0.0.1".to_string()),
+                password_sha: digest(password.to_string()),
+                token_expiration_time: 0,
+            },
+            tokens: {
+                let mut t = crate::account::verify::Tokens::new();
+                token = t.new_token(account_id, 0);
+                t
+            },
+            verify: crate::account::UserVerifyVariant::None,
+        })
+        .await;
+
+    let response_json: serde_json::Value = app
+        .post("/api/account/logout")
+        .header("Token", token.to_string())
+        .header("AccountId", account_id.to_string())
+        .recv_json()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response_json
+            .as_object()
+            .unwrap()
+            .get("status")
+            .unwrap()
+            .as_str()
+            .unwrap(),
+        "success"
+    );
+
+    let cxt = crate::RequirePermissionContext {
+        token: token.to_string(),
+        user_id: account_id,
+    };
+    assert!(!cxt.valid(vec![]).await.unwrap());
+}
+
+#[serial]
+#[async_std::test]
+async fn account_signout() {
+    reset_all().await;
+    let mut app = tide::new();
+    app.at("/api/account/signout")
+        .post(crate::account::handle::sign_out_account);
+
+    let account_id = 123456;
+    let password = "password123456";
+
+    let token;
+
+    crate::account::INSTANCE
+        .push(crate::account::Account::Verified {
+            id: account_id,
+            attributes: crate::account::UserAttributes {
+                email: lettre::Address::new("yujiening2025", "i.pkuschool.edu.cn").unwrap(),
+                name: "Jiening Yu".to_string(),
+                school_id: 2522320,
+                house: Some(sms3rs_shared::account::House::ZhiZhi),
+                phone: 16601550826,
+                organization: None,
+                permissions: vec![],
+                registration_time: chrono::Utc::now(),
+                registration_ip: Some("127.0.0.1".to_string()),
+                password_sha: digest(password.to_string()),
+                token_expiration_time: 0,
+            },
+            tokens: {
+                let mut t = crate::account::verify::Tokens::new();
+                token = t.new_token(account_id, 0);
+                t
+            },
+            verify: crate::account::UserVerifyVariant::None,
+        })
+        .await;
+
+    use sms3rs_shared::account::handle::AccountSignOutDescriptor;
+
+    let descriptor_wrong = AccountSignOutDescriptor {
+        password: "fakepassword".to_string(),
+    };
+
+    {
         let response_json: serde_json::Value = app
-            .post("/api/account/login")
-            .body_json(&descriptor)
+            .post("/api/account/signout")
+            .header("Token", token.to_string())
+            .header("AccountId", account_id.to_string())
+            .body_json(&descriptor_wrong)
             .unwrap()
             .recv_json()
             .await
             .unwrap();
 
-        assert!(
+        assert_ne!(
             response_json
                 .as_object()
                 .unwrap()
                 .get("status")
                 .unwrap()
                 .as_str()
-                .unwrap()
-                == "success"
-        );
-
-        assert_eq!(
-            response_json
-                .as_object()
-                .unwrap()
-                .get("account_id")
-                .unwrap()
-                .as_u64()
                 .unwrap(),
-            account_id
+            "success"
         );
-
-        token = response_json
-            .as_object()
-            .unwrap()
-            .get("token")
-            .unwrap()
-            .as_str()
-            .unwrap()
-            .to_string();
     }
 
     {
-        let cxt = crate::RequirePermissionContext {
-            token: token.to_string(),
-            user_id: account_id,
+        let descriptor = AccountSignOutDescriptor {
+            password: password.to_string(),
         };
 
-        // Test `RequirePermissionContext`
-        assert!(cxt.valid(vec![]).await.unwrap());
-        assert!(!cxt
-            .valid(vec![sms3rs_shared::account::Permission::OP])
-            .await
-            .unwrap());
-    }
-
-    {
         let response_json: serde_json::Value = app
-            .post("/api/account/logout")
+            .post("/api/account/signout")
             .header("Token", token.to_string())
             .header("AccountId", account_id.to_string())
+            .body_json(&descriptor)
+            .unwrap()
             .recv_json()
             .await
             .unwrap();
@@ -246,11 +449,8 @@ async fn account_logging() {
                 .unwrap(),
             "success"
         );
-
-        let cxt = crate::RequirePermissionContext {
-            token: token.to_string(),
-            user_id: account_id,
-        };
-        assert!(!cxt.valid(vec![]).await.unwrap());
     }
+
+    assert!(crate::account::INSTANCE.inner().read().await.is_empty());
+    assert!(crate::account::INSTANCE.index().read().await.is_empty());
 }

@@ -17,11 +17,11 @@ pub static VERIFICATION_CODE: std::sync::atomic::AtomicU32 = std::sync::atomic::
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Context {
     /// The email address.
-    pub(super) email: lettre::Address,
+    pub email: lettre::Address,
     /// The pending verification code with 6 digits.
-    pub(super) code: u32,
+    pub code: u32,
     /// The expire time of this context.
-    pub(super) expire_time: NaiveDateTime,
+    pub expire_time: NaiveDateTime,
 }
 
 impl Context {
@@ -68,7 +68,8 @@ impl Tokens {
     }
 
     /// Create a new token.
-    pub(super) fn new_token(
+    #[must_use]
+    pub fn new_token(
         &mut self,
         // The user id.
         id: u64,

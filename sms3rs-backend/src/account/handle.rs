@@ -274,7 +274,7 @@ pub async fn logout_account(req: Request<()>) -> tide::Result {
     }
 }
 
-/// Sign in and remove an verified account.
+/// Sign out and remove an verified account.
 pub async fn sign_out_account(mut req: Request<()>) -> tide::Result {
     let account_manager = &super::INSTANCE;
     let cxt = match RequirePermissionContext::from_header(&req) {
