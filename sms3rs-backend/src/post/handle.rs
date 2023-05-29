@@ -40,7 +40,7 @@ pub async fn cache_image(mut req: Request<()>) -> tide::Result {
                 let id;
                 super::cache::INSTANCE
                     .push(
-                        match PostImageCache::new(&req.body_bytes().await?, cxt.user_id) {
+                        match PostImageCache::new(&req.body_bytes().await?, cxt.account_id) {
                             Ok(e) => {
                                 id = e.1;
                                 e.0
@@ -208,7 +208,7 @@ pub async fn new_post(mut req: Request<()>) -> tide::Result {
                     status: {
                         let mut deque = VecDeque::new();
                         deque.push_back(super::PostAcceptationData {
-                            operator: cxt.user_id,
+                            operator: cxt.account_id,
                             status: super::PostAcceptationStatus::Pending,
                             time: Utc::now(),
                         });
@@ -235,7 +235,7 @@ pub async fn new_post(mut req: Request<()>) -> tide::Result {
                             descriptor.time_range
                         },
                     },
-                    publisher: cxt.user_id,
+                    publisher: cxt.account_id,
                 };
                 if !super::save_post(&post).await {
                     error!("Error while saving post {}", post.id);
@@ -293,7 +293,7 @@ pub async fn get_posts(mut req: Request<()>) -> tide::Result {
                             .index()
                             .read()
                             .await
-                            .get(&cxt.user_id)
+                            .get(&cxt.account_id)
                             .unwrap(),
                     )
                     .unwrap()
@@ -379,7 +379,7 @@ pub async fn edit_post(mut req: Request<()>) -> tide::Result {
                 for p in super::INSTANCE.posts.read().await.iter() {
                     let pr = p.read().await;
                     if pr.id == descriptor.post {
-                        if pr.publisher != cxt.user_id
+                        if pr.publisher != cxt.account_id
                             || pr
                                 .status
                                 .back()
@@ -397,7 +397,7 @@ pub async fn edit_post(mut req: Request<()>) -> tide::Result {
                         let id = pr.id;
                         drop(pr);
                         for variant in descriptor.variants.iter() {
-                            match apply_edit_post_variant(variant, id, cxt.user_id).await {
+                            match apply_edit_post_variant(variant, id, cxt.account_id).await {
                                 Some(err) => {
                                     return Ok::<tide::Response, tide::Error>(
                                         json!({
@@ -586,7 +586,7 @@ pub async fn get_posts_info(mut req: Request<()>) -> tide::Result {
                             .index()
                             .read()
                             .await
-                            .get(&cxt.user_id)
+                            .get(&cxt.account_id)
                             .unwrap(),
                     )
                     .unwrap()
@@ -600,7 +600,9 @@ pub async fn get_posts_info(mut req: Request<()>) -> tide::Result {
                     for e in posts.iter() {
                         let er = e.read().await;
                         if er.id == *p {
-                            if er.publisher == cxt.user_id || ar.has_permission(Permission::Check) {
+                            if er.publisher == cxt.account_id
+                                || ar.has_permission(Permission::Check)
+                            {
                                 results.push(GetPostInfoResult::Full(er.clone()))
                             } else if er.metadata.time_range.0 <= date
                                 && er.metadata.time_range.1 >= date
@@ -686,7 +688,7 @@ pub async fn approve_post(mut req: Request<()>) -> tide::Result {
                                     );
                                 }
                                 pw.status.push_back(super::PostAcceptationData {
-                                    operator: cxt.user_id,
+                                    operator: cxt.account_id,
                                     status: PostAcceptationStatus::Accepted(
                                         msg.unwrap_or_default(),
                                     ),
@@ -706,7 +708,7 @@ pub async fn approve_post(mut req: Request<()>) -> tide::Result {
                                     );
                                 }
                                 pw.status.push_back(super::PostAcceptationData {
-                                    operator: cxt.user_id,
+                                    operator: cxt.account_id,
                                     status: PostAcceptationStatus::Rejected({
                                         if msg.is_empty() {
                                             return Ok::<tide::Response, tide::Error>(

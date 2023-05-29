@@ -2,7 +2,7 @@ mod account;
 pub(crate) mod config;
 mod post;
 
-/// The module for unit testing, will only avaliable in dev env.
+/// The module for unit testing, will only be availabled in dev env.
 #[cfg(test)]
 mod tests;
 
@@ -62,7 +62,7 @@ pub struct RequirePermissionContext {
     /// The access token of this account.
     pub token: String,
     /// The only id of this account.
-    pub user_id: u64,
+    pub account_id: u64,
 }
 
 impl RequirePermissionContext {
@@ -73,24 +73,24 @@ impl RequirePermissionContext {
             .index()
             .read()
             .await
-            .get(&self.user_id)
+            .get(&self.account_id)
             .copied()
         {
             Some(index) => {
-                account_manager.refresh(self.user_id).await;
+                account_manager.refresh(self.account_id).await;
                 let b = account_manager.inner().read().await;
                 let account = b.get(index).unwrap().read().await;
                 Ok(match account.deref() {
                     account::Account::Unverified(_) => {
                         return Err(AccountManagerError::Account(
-                            self.user_id,
+                            self.account_id,
                             account::AccountError::UserUnverifiedError,
                         ))
                     }
                     account::Account::Verified { tokens, .. } => tokens.token_usable(&self.token),
                 } && permissions.iter().all(|p| account.has_permission(*p)))
             }
-            None => Err(AccountManagerError::AccountNotFound(self.user_id)),
+            None => Err(AccountManagerError::AccountNotFound(self.account_id)),
         }
     }
 
@@ -100,7 +100,7 @@ impl RequirePermissionContext {
                 Some(e) => e.as_str().to_string(),
                 None => return None,
             },
-            user_id: match request.header("AccountId") {
+            account_id: match request.header("AccountId") {
                 Some(e) => match e.as_str().parse() {
                     Ok(n) => n,
                     Err(_) => return None,

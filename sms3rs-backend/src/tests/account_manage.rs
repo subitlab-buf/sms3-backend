@@ -105,6 +105,7 @@ async fn make() {
         .read()
         .await
         .has_permission(sms3rs_shared::account::Permission::ManageAccounts));
+
     // Test for permission overflowing
     assert!(!a
         .unwrap()

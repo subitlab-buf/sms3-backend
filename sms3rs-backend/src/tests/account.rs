@@ -207,7 +207,7 @@ async fn login() {
 
     let cxt = crate::RequirePermissionContext {
         token: token.to_string(),
-        user_id: account_id,
+        account_id: account_id,
     };
 
     assert!(cxt.valid(vec![]).await.unwrap());
@@ -252,7 +252,7 @@ async fn require_permission_context() {
 
         let cxt = crate::RequirePermissionContext {
             token: token.to_string(),
-            user_id: account_id,
+            account_id: account_id,
         };
 
         assert!(cxt.valid(vec![]).await.unwrap());
@@ -263,7 +263,7 @@ async fn require_permission_context() {
 
         let cxt_wrong = crate::RequirePermissionContext {
             token: "wrongtoken".to_string(),
-            user_id: account_id,
+            account_id: account_id,
         };
 
         assert!(!cxt_wrong.valid(vec![]).await.unwrap());
@@ -282,7 +282,7 @@ async fn require_permission_context() {
 
         let cxt = crate::RequirePermissionContext {
             token: 6.to_string(),
-            user_id: account_id,
+            account_id: account_id,
         };
 
         assert!(!cxt.valid(vec![]).await.unwrap_or(true));
@@ -350,7 +350,7 @@ async fn logout() {
 
     let cxt = crate::RequirePermissionContext {
         token: token.to_string(),
-        user_id: account_id,
+        account_id: account_id,
     };
     assert!(!cxt.valid(vec![]).await.unwrap());
 }

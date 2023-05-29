@@ -102,11 +102,11 @@ pub mod manage {
     #[derive(Serialize, Deserialize)]
     pub struct AccountModifyDescriptor {
         pub account_id: u64,
-        pub variants: Vec<AccountModifyType>,
+        pub variants: Vec<AccountModifyVariant>,
     }
 
     #[derive(Serialize, Deserialize)]
-    pub enum AccountModifyType {
+    pub enum AccountModifyVariant {
         Email(lettre::Address),
         Name(String),
         SchoolId(u32),

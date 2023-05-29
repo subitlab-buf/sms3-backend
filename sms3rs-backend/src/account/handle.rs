@@ -238,7 +238,7 @@ pub async fn logout_account(req: Request<()>) -> tide::Result {
             )
         }
     };
-    match account_manager.index().read().await.get(&cxt.user_id) {
+    match account_manager.index().read().await.get(&cxt.account_id) {
         Some(index) => {
             let b = account_manager.inner().read().await;
             let mut aw = b.get(*index).unwrap().write().await;
@@ -295,7 +295,7 @@ pub async fn sign_out_account(mut req: Request<()>) -> tide::Result {
         .read()
         .await
         .get(
-            match account_manager.index().read().await.get(&cxt.user_id) {
+            match account_manager.index().read().await.get(&cxt.account_id) {
                 Some(e) => *e,
                 _ => {
                     return Ok::<tide::Response, tide::Error>(
@@ -329,8 +329,8 @@ pub async fn sign_out_account(mut req: Request<()>) -> tide::Result {
                 && tokens.token_usable(&cxt.token)
         }
     } {
-        account_manager.remove(cxt.user_id).await;
-        info!("Account {} signed out", cxt.user_id);
+        account_manager.remove(cxt.account_id).await;
+        info!("Account {} signed out", cxt.account_id);
         Ok::<tide::Response, tide::Error>(
             json!({
                 "status": "success",
@@ -372,7 +372,7 @@ pub async fn view_account(req: Request<()>) -> tide::Result {
                         .index()
                         .read()
                         .await
-                        .get(&context.user_id)
+                        .get(&context.account_id)
                         .unwrap(),
                 )
                 .unwrap()
@@ -431,7 +431,7 @@ pub async fn edit_account(mut req: Request<()>) -> tide::Result {
                         .index()
                         .read()
                         .await
-                        .get(&context.user_id)
+                        .get(&context.account_id)
                         .unwrap(),
                 )
                 .unwrap()
@@ -634,7 +634,7 @@ pub mod manage {
                             .index()
                             .read()
                             .await
-                            .get(&context.user_id)
+                            .get(&context.account_id)
                             .unwrap(),
                     )
                     .unwrap()
@@ -852,7 +852,7 @@ pub mod manage {
                     );
                 }
                 for variant in descriptor.variants {
-                    match apply_account_modify_type(variant, a.deref_mut(), &context).await {
+                    match apply_account_modify_variant(variant, a.deref_mut(), &context).await {
                         Ok(_) => continue,
                         Err(err) => {
                             return Ok::<tide::Response, tide::Error>(
@@ -885,21 +885,21 @@ pub mod manage {
         }
     }
 
-    async fn apply_account_modify_type(
-        mt: AccountModifyType,
+    async fn apply_account_modify_variant(
+        mt: AccountModifyVariant,
         account: &mut Account,
         context: &RequirePermissionContext,
     ) -> Result<(), AccountError> {
         match account {
             Account::Unverified(_) => return Err(AccountError::UserUnverifiedError),
             Account::Verified { attributes, .. } => match mt {
-                AccountModifyType::Name(name) => attributes.name = name,
-                AccountModifyType::SchoolId(id) => attributes.school_id = id,
-                AccountModifyType::Phone(phone) => attributes.phone = phone,
-                AccountModifyType::House(house) => attributes.house = house,
-                AccountModifyType::Organization(org) => attributes.organization = org,
-                AccountModifyType::Email(email) => attributes.email = email,
-                AccountModifyType::Permission(permissions) => {
+                AccountModifyVariant::Name(name) => attributes.name = name,
+                AccountModifyVariant::SchoolId(id) => attributes.school_id = id,
+                AccountModifyVariant::Phone(phone) => attributes.phone = phone,
+                AccountModifyVariant::House(house) => attributes.house = house,
+                AccountModifyVariant::Organization(org) => attributes.organization = org,
+                AccountModifyVariant::Email(email) => attributes.email = email,
+                AccountModifyVariant::Permission(permissions) => {
                     if !context.valid(permissions.clone()).await.unwrap_or(false) {
                         return Err(AccountError::PermissionDeniedError);
                     }
