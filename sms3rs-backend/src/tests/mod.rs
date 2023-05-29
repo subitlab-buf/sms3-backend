@@ -1,4 +1,5 @@
 mod account;
+mod account_manage;
 
 /// Reset all static instances.
 async fn reset_all() {

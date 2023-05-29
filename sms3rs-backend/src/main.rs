@@ -2,6 +2,7 @@ mod account;
 pub(crate) mod config;
 mod post;
 
+/// The module for unit testing, will only avaliable in dev env.
 #[cfg(test)]
 mod tests;
 

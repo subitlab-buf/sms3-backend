@@ -32,18 +32,16 @@ pub type Permissions = Vec<Permission>;
 /// Represent permissions an account has.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Permission {
-    /// View approved and currently active posters.
-    View,
-    /// Post posters for approval.
-    Post,
-    /// View all posters, including archived and unapproved.
-    Check,
     /// Approve posters or edit approvals.
     Approve,
-    /// View accounts.
-    ViewAccounts,
-    /// Manage accounts.
+    /// View all posters, including archived and unapproved.
+    Check,
     ManageAccounts,
-    /// The top OP permission. No usage.
+    /// The top permission, no actual usage.
     OP,
+    /// Post posters for approval.
+    Post,
+    /// View approved and currently active posters.
+    View,
+    ViewAccounts,
 }

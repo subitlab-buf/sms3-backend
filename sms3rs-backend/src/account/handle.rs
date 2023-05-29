@@ -692,10 +692,12 @@ pub mod manage {
                     error!("Error when saving account {}", account.email());
                 }
                 info!("Account {} (id: {}) built", account.email(), account.id());
+                let id = account.id();
                 b.push(RwLock::new(account));
                 Ok::<tide::Response, tide::Error>(
                     json!({
                         "status": "success",
+                        "account_id": id,
                     })
                     .into(),
                 )

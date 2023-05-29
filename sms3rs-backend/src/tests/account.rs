@@ -395,11 +395,11 @@ async fn signout() {
 
     use sms3rs_shared::account::handle::AccountSignOutDescriptor;
 
-    let descriptor_wrong = AccountSignOutDescriptor {
-        password: "fakepassword".to_string(),
-    };
-
     {
+        let descriptor_wrong = AccountSignOutDescriptor {
+            password: "fakepassword".to_string(),
+        };
+
         let response_json: serde_json::Value = app
             .post("/api/account/signout")
             .header("Token", token.to_string())
