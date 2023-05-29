@@ -3,9 +3,8 @@
 ## Workspace modules
 
 - Server (partial implemented)
-- Common (shared code for client and server, unimplemented)
+- Common (shared code for client and server)
 - Client (unimplemented)
-- Iced GUI (unimplemented)
 
 ## Run and debug this project
 

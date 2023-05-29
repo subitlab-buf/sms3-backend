@@ -215,7 +215,7 @@ async fn account_login() {
     assert!(cxt.valid(vec![]).await.unwrap());
 }
 
-/// Test for usage of `RequirePermissionContext`
+/// Test for usage of `RequirePermissionContext`.
 #[serial]
 #[async_std::test]
 async fn require_permission_context() {
@@ -453,4 +453,76 @@ async fn account_signout() {
 
     assert!(crate::account::INSTANCE.inner().read().await.is_empty());
     assert!(crate::account::INSTANCE.index().read().await.is_empty());
+}
+
+#[serial]
+#[async_std::test]
+async fn view_account() {
+    reset_all().await;
+    let mut app = tide::new();
+    app.at("/api/account/view")
+        .post(crate::account::handle::view_account);
+
+    let account_id = 123456;
+    let password = "password123456";
+
+    let token;
+
+    crate::account::INSTANCE
+        .push(crate::account::Account::Verified {
+            id: account_id,
+            attributes: crate::account::UserAttributes {
+                email: lettre::Address::new("yujiening2025", "i.pkuschool.edu.cn").unwrap(),
+                name: "Jiening Yu".to_string(),
+                school_id: 2522320,
+                house: Some(sms3rs_shared::account::House::ZhiZhi),
+                phone: 16601550826,
+                organization: None,
+                permissions: vec![],
+                registration_time: chrono::Utc::now(),
+                registration_ip: Some("127.0.0.1".to_string()),
+                password_sha: digest(password.to_string()),
+                token_expiration_time: 0,
+            },
+            tokens: {
+                let mut t = crate::account::verify::Tokens::new();
+                token = t.new_token(account_id, 0);
+                t
+            },
+            verify: crate::account::UserVerifyVariant::None,
+        })
+        .await;
+
+    use sms3rs_shared::account::handle::ViewAccountResult;
+
+    let response_json: serde_json::Value = app
+        .post("/api/account/view")
+        .header("Token", token.to_string())
+        .header("AccountId", account_id.to_string())
+        .recv_json()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response_json
+            .as_object()
+            .unwrap()
+            .get("status")
+            .unwrap()
+            .as_str()
+            .unwrap(),
+        "success"
+    );
+
+    let result: Result<ViewAccountResult, _> = serde_json::from_value(
+        response_json
+            .as_object()
+            .unwrap()
+            .get("result")
+            .unwrap()
+            .clone(),
+    );
+
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap().id, account_id);
 }

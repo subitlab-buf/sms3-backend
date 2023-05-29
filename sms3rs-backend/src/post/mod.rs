@@ -26,13 +26,13 @@ impl Display for PostError {
 impl Error for PostError {}
 
 #[must_use = "The save result should be handled"]
-pub fn save_post(_post: &Post) -> bool {
+pub async fn save_post(_post: &Post) -> bool {
     #[cfg(not(test))]
     {
-        use std::fs::File;
-        use std::io::Write;
+        use async_std::fs::File;
+        use async_std::io::WriteExt;
 
-        match File::create(format!("./data/posts/{}.toml", _post.id)) {
+        match File::create(format!("./data/posts/{}.toml", _post.id)).await {
             Ok(mut file) => file
                 .write_all(
                     match toml::to_string(_post) {
@@ -41,6 +41,7 @@ pub fn save_post(_post: &Post) -> bool {
                     }
                     .as_bytes(),
                 )
+                .await
                 .is_ok(),
             Err(_) => false,
         }
@@ -51,11 +52,12 @@ pub fn save_post(_post: &Post) -> bool {
 }
 
 #[must_use = "The deletion result should be handled"]
-pub fn remove_post(_post: &Post) -> bool {
+pub async fn remove_post(_post: &Post) -> bool {
     #[cfg(not(test))]
     {
-        use std::fs;
-        return fs::remove_file(format!("./data/posts/{}.toml", _post.id)).is_ok();
+        return async_std::fs::remove_file(format!("./data/posts/{}.toml", _post.id))
+            .await
+            .is_ok();
     }
 
     #[cfg(test)]

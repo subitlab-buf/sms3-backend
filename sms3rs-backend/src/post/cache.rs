@@ -5,7 +5,6 @@ use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::hash_map::DefaultHasher,
-    fs,
     hash::{Hash, Hasher},
     ops::DerefMut,
     sync::atomic::{AtomicBool, Ordering},
@@ -49,8 +48,8 @@ impl PostImageCache {
     #[cfg(not(test))]
     #[must_use = "The save result should be handled"]
     async fn save(&self) -> bool {
-        use std::fs::File;
-        use std::io::Write;
+        use async_std::fs::File;
+        use async_std::io::WriteExt;
         use std::ops::Deref;
 
         (match &self.img.read().await.deref() {
@@ -65,7 +64,7 @@ impl PostImageCache {
                 ok
             }
             None => true,
-        }) && (match File::create(format!("./data/images/{}.toml", self.hash)) {
+        }) && (match File::create(format!("./data/images/{}.toml", self.hash)).await {
             Ok(mut file) => file
                 .write_all(
                     match toml::to_string(self) {
@@ -74,6 +73,7 @@ impl PostImageCache {
                     }
                     .as_bytes(),
                 )
+                .await
                 .is_ok(),
             Err(_) => false,
         })
@@ -101,7 +101,7 @@ impl CacheManager {
             use std::io::Read;
 
             let mut vec = Vec::new();
-            for dir in fs::read_dir("./data/images").unwrap() {
+            for dir in std::fs::read_dir("./data/images").unwrap() {
                 match dir {
                     Ok(f) => match {
                         toml::from_str::<PostImageCache>(&{
@@ -151,7 +151,8 @@ impl CacheManager {
             let mut i = 0;
             for e in cr.iter().enumerate() {
                 if !e.1.blocked.load(Ordering::Relaxed) {
-                    let _ = fs::remove_file(format!("./data/images/{}.png", e.1.hash));
+                    let _ =
+                        async_std::fs::remove_file(format!("./data/images/{}.png", e.1.hash)).await;
                     i = e.0;
                     break;
                 }

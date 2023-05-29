@@ -58,7 +58,7 @@ pub async fn create_account(mut req: Request<()>) -> tide::Result {
             .write()
             .await
             .insert(account.id(), len);
-        if !account.save() {
+        if !account.save().await {
             error!("Error while saving account {}", account.email());
         }
         account
@@ -123,7 +123,7 @@ pub async fn verify_account(mut req: Request<()>) -> tide::Result {
                             .into(),
                         );
                     }
-                    if !a.save() {
+                    if !a.save().await {
                         error!("Error when saving account {}", a.email());
                     }
                     info!("Account verified: {} (id: {})", a.email(), a.id());
@@ -162,7 +162,7 @@ pub async fn verify_account(mut req: Request<()>) -> tide::Result {
                             .into(),
                         );
                     }
-                    if !a.save() {
+                    if !a.save().await {
                         error!("Error when saving account {}", a.email());
                     }
                     info!("Password reseted: {} (id: {})", a.email(), a.id());
@@ -193,7 +193,7 @@ pub async fn login_account(mut req: Request<()>) -> tide::Result {
         if account.read().await.email() == &descriptor.email {
             let mut aw = account.write().await;
             let token = aw.login(&descriptor.password);
-            if !aw.save() {
+            if !aw.save().await {
                 error!("Error when saving account {}", aw.email());
             }
             return Ok::<tide::Response, tide::Error>(match token {
@@ -251,7 +251,7 @@ pub async fn logout_account(req: Request<()>) -> tide::Result {
                     .into(),
                 ),
                 Ok(_) => {
-                    if !aw.save() {
+                    if !aw.save().await {
                         error!("Error when saving account {}", aw.email());
                     }
                     info!("Account {} (id: {}) logged out", aw.email(), aw.id());
@@ -451,7 +451,7 @@ pub async fn edit_account(mut req: Request<()>) -> tide::Result {
                     }
                 }
             }
-            if !a.save() {
+            if !a.save().await {
                 error!("Error when saving account {}", a.email());
             }
             Ok::<tide::Response, tide::Error>(
@@ -561,7 +561,7 @@ pub async fn reset_password(mut req: Request<()>) -> tide::Result {
                                 .into())
                             }
                         };
-                        if !aw.save() {
+                        if !aw.save().await {
                             error!("Error when saving account {}", aw.email());
                         }
                         e
@@ -576,6 +576,7 @@ pub async fn reset_password(mut req: Request<()>) -> tide::Result {
             };
         }
     }
+
     Ok(json!({
         "status": "error",
         "error": "Target account not found",
@@ -689,7 +690,7 @@ pub mod manage {
                     .write()
                     .await
                     .insert(account.id(), b.len());
-                if !account.save() {
+                if !account.save().await {
                     error!("Error when saving account {}", account.email());
                 }
                 info!("Account {} (id: {}) built", account.email(), account.id());
@@ -864,7 +865,7 @@ pub mod manage {
                         }
                     }
                 }
-                if !a.save() {
+                if !a.save().await {
                     error!("Error when saving account {}", a.email());
                 }
                 Ok::<tide::Response, tide::Error>(

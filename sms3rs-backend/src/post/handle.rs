@@ -237,7 +237,7 @@ pub async fn new_post(mut req: Request<()>) -> tide::Result {
                     },
                     publisher: cxt.user_id,
                 };
-                if !super::save_post(&post) {
+                if !super::save_post(&post).await {
                     error!("Error while saving post {}", post.id);
                 }
                 let id = post.id;
@@ -410,6 +410,10 @@ pub async fn edit_post(mut req: Request<()>) -> tide::Result {
                                 _ => (),
                             }
                         }
+                        let post = p.read().await;
+                        if !super::save_post(post.deref()).await {
+                            error!("Error while saving post {}", post.id);
+                        }
                         return Ok::<tide::Response, tide::Error>(
                             json!({
                                 "status": "success",
@@ -513,7 +517,7 @@ pub async fn apply_edit_post_variant(
             })
         }
         EditPostVariant::Destroy => {
-            if !super::remove_post(post.deref()) {
+            if !super::remove_post(post.deref()).await {
                 error!("Post {} save failed", post.id);
             }
             drop(post);
@@ -668,7 +672,7 @@ pub async fn approve_post(mut req: Request<()>) -> tide::Result {
                     if pr.id == descriptor.post {
                         drop(pr);
                         let mut pw = p.write().await;
-                        return match descriptor.variant {
+                        match descriptor.variant {
                             ApprovePostVariant::Accept(msg) => {
                                 if pw.status.back().map_or(false, |e| {
                                     matches!(e.status, PostAcceptationStatus::Accepted(_))
@@ -688,12 +692,6 @@ pub async fn approve_post(mut req: Request<()>) -> tide::Result {
                                     ),
                                     time: Utc::now(),
                                 });
-                                Ok::<tide::Response, tide::Error>(
-                                    json!({
-                                        "status": "success",
-                                    })
-                                    .into(),
-                                )
                             }
                             ApprovePostVariant::Reject(msg) => {
                                 if pw.status.back().map_or(false, |e| {
@@ -723,14 +721,19 @@ pub async fn approve_post(mut req: Request<()>) -> tide::Result {
                                     }),
                                     time: Utc::now(),
                                 });
-                                Ok::<tide::Response, tide::Error>(
-                                    json!({
-                                        "status": "success",
-                                    })
-                                    .into(),
-                                )
                             }
                         };
+
+                        if !super::save_post(pw.deref()).await {
+                            error!("Error while saving post {}", pw.id);
+                        }
+
+                        return Ok::<tide::Response, tide::Error>(
+                            json!({
+                                "status": "success",
+                            })
+                            .into(),
+                        );
                     }
                 }
                 Ok::<tide::Response, tide::Error>(

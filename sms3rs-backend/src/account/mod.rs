@@ -248,10 +248,11 @@ impl Account {
     /// Save this account and return whether if this account was saved successfully.
     #[cfg(not(test))]
     #[must_use = "The save result should be handled"]
-    pub fn save(&self) -> bool {
-        use std::fs::File;
-        use std::io::Write;
-        if let Ok(mut file) = File::create(format!("./data/accounts/{}.toml", self.id())) {
+    pub async fn save(&self) -> bool {
+        use async_std::fs::File;
+        use async_std::io::WriteExt;
+
+        if let Ok(mut file) = File::create(format!("./data/accounts/{}.toml", self.id())).await {
             file.write_all(
                 match toml::to_string(&self) {
                     Ok(e) => e,
@@ -259,6 +260,7 @@ impl Account {
                 }
                 .as_bytes(),
             )
+            .await
             .is_ok()
         } else {
             false
@@ -268,20 +270,21 @@ impl Account {
     /// Save this account and return whether if this account was saved successfully.
     #[cfg(test)]
     #[must_use = "The save result should be handled"]
-    pub fn save(&self) -> bool {
+    pub async fn save(&self) -> bool {
         true
     }
 
     /// Remove this account from filesystem and return whether this account was removed successfully.
     #[cfg(not(test))]
-    pub fn remove(&self) -> bool {
-        use std::fs;
-        fs::remove_file(format!("./data/accounts/{}.json", self.id())).is_ok()
+    pub async fn remove(&self) -> bool {
+        async_std::fs::remove_file(format!("./data/accounts/{}.json", self.id()))
+            .await
+            .is_ok()
     }
 
     /// Remove this account from filesystem and return whether this account was removed successfully.
     #[cfg(test)]
-    pub fn remove(&self) -> bool {
+    pub async fn remove(&self) -> bool {
         true
     }
 }
@@ -503,7 +506,7 @@ impl AccountManager {
         if let Some(index) = self.index.read().await.get(&id) {
             {
                 let b = self.accounts.read().await;
-                b.get(*index).unwrap().read().await.remove();
+                b.get(*index).unwrap().read().await.remove().await;
             }
             self.accounts.write().await.remove(*index);
         }
