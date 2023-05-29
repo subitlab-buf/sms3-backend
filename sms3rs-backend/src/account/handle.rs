@@ -472,27 +472,25 @@ pub async fn edit_account(mut req: Request<()>) -> tide::Result {
 }
 
 pub fn apply_metadata_type(
-    mt: AccountEditMetadataType,
+    mt: AccountEditVariant,
     account: &mut Account,
 ) -> Result<(), AccountError> {
     match account {
         Account::Unverified(_) => return Err(AccountError::UserUnverifiedError),
         Account::Verified { attributes, .. } => match mt {
-            AccountEditMetadataType::Name(name) => attributes.name = name,
-            AccountEditMetadataType::SchoolId(id) => attributes.school_id = id,
-            AccountEditMetadataType::Phone(phone) => attributes.phone = phone,
-            AccountEditMetadataType::House(house) => attributes.house = house,
-            AccountEditMetadataType::Organization(org) => attributes.organization = org,
-            AccountEditMetadataType::Password { old, new } => {
+            AccountEditVariant::Name(name) => attributes.name = name,
+            AccountEditVariant::SchoolId(id) => attributes.school_id = id,
+            AccountEditVariant::Phone(phone) => attributes.phone = phone,
+            AccountEditVariant::House(house) => attributes.house = house,
+            AccountEditVariant::Organization(org) => attributes.organization = org,
+            AccountEditVariant::Password { old, new } => {
                 if attributes.password_sha == digest(old) {
                     attributes.password_sha = digest(new)
                 } else {
                     return Err(AccountError::PasswordIncorrectError);
                 }
             }
-            AccountEditMetadataType::TokenExpireTime(time) => {
-                attributes.token_expiration_time = time
-            }
+            AccountEditVariant::TokenExpireTime(time) => attributes.token_expiration_time = time,
         },
     }
     Ok(())

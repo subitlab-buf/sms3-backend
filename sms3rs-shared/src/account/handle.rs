@@ -53,11 +53,11 @@ pub struct ViewAccountResult {
 
 #[derive(Serialize, Deserialize)]
 pub struct AccountEditDescriptor {
-    pub variants: Vec<AccountEditMetadataType>,
+    pub variants: Vec<AccountEditVariant>,
 }
 
 #[derive(Serialize, Deserialize)]
-pub enum AccountEditMetadataType {
+pub enum AccountEditVariant {
     Name(String),
     SchoolId(u32),
     Phone(u64),
