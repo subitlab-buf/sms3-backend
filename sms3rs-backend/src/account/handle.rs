@@ -438,7 +438,7 @@ pub async fn edit_account(mut req: Request<()>) -> tide::Result {
                 .write()
                 .await;
             for variant in descriptor.variants {
-                match apply_metadata_type(variant, a.deref_mut()) {
+                match apply_edit_variant(variant, a.deref_mut()) {
                     Ok(_) => (),
                     Err(err) => {
                         return Ok::<tide::Response, tide::Error>(
@@ -471,7 +471,7 @@ pub async fn edit_account(mut req: Request<()>) -> tide::Result {
     }
 }
 
-pub fn apply_metadata_type(
+pub fn apply_edit_variant(
     mt: AccountEditVariant,
     account: &mut Account,
 ) -> Result<(), AccountError> {
