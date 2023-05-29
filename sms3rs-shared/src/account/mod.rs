@@ -17,7 +17,7 @@ pub enum House {
 }
 
 /// Represents a user's metadata.
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct UserMetadata {
     pub email: lettre::Address,
     pub name: String,

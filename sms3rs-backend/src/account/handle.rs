@@ -762,21 +762,27 @@ pub mod manage {
                         },
                         Account::Verified { attributes, .. } => {
                             let permissions = account.permissions();
-                            if !context.valid(permissions.clone()).await.unwrap() {}
-                            ViewAccountResult::Ok(super::ViewAccountResult {
-                                id: *aid,
-                                metadata: account.metadata().unwrap(),
-                                permissions,
-                                registration_time: attributes.registration_time,
-                                registration_ip: attributes.registration_ip.clone(),
-                            })
+                            if !context.valid(permissions.clone()).await.unwrap() {
+                                ViewAccountResult::Err {
+                                    id: account.id(),
+                                    error: "Permission denied".to_string(),
+                                }
+                            } else {
+                                ViewAccountResult::Ok(super::ViewAccountResult {
+                                    id: *aid,
+                                    metadata: account.metadata().unwrap(),
+                                    permissions,
+                                    registration_time: attributes.registration_time,
+                                    registration_ip: attributes.registration_ip.clone(),
+                                })
+                            }
                         }
                     })
                 }
                 Ok::<tide::Response, tide::Error>(
                     json!({
                         "status": "success",
-                        "result": vec,
+                        "results": vec,
                     })
                     .into(),
                 )

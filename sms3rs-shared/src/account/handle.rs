@@ -42,7 +42,7 @@ pub struct AccountSignOutDescriptor {
     pub password: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct ViewAccountResult {
     pub id: u64,
     pub metadata: super::UserMetadata,
@@ -93,7 +93,7 @@ pub mod manage {
         pub accounts: Vec<u64>,
     }
 
-    #[derive(Serialize, Deserialize)]
+    #[derive(Serialize, Deserialize, Debug)]
     pub enum ViewAccountResult {
         Err { id: u64, error: String },
         Ok(super::ViewAccountResult),
