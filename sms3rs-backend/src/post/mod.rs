@@ -65,7 +65,7 @@ pub async fn remove_post(_post: &Post) -> bool {
 }
 
 pub struct PostManager {
-    posts: RwLock<Vec<RwLock<Post>>>,
+    pub posts: RwLock<Vec<RwLock<Post>>>,
 }
 
 impl PostManager {

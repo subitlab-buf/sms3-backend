@@ -40,7 +40,22 @@ pub async fn cache_image(mut req: Request<()>) -> tide::Result {
                 let id;
                 super::cache::INSTANCE
                     .push(
-                        match PostImageCache::new(&req.body_bytes().await?, cxt.account_id) {
+                        match PostImageCache::new(
+                            &{
+                                let bs = req.body_bytes().await?;
+                                if bs.len() > 50_000_000 {
+                                    return Ok::<tide::Response, tide::Error>(
+                                        json!({
+                                            "status": "error",
+                                            "error": format!("Image too big"),
+                                        })
+                                        .into(),
+                                    );
+                                }
+                                bs
+                            },
+                            cxt.account_id,
+                        ) {
                             Ok(e) => {
                                 id = e.1;
                                 e.0
@@ -222,7 +237,7 @@ pub async fn new_post(mut req: Request<()>) -> tide::Result {
                                 .time_range
                                 .0
                                 .checked_add_days(Days::new(7))
-                                .map_or(false, |e| e > descriptor.time_range.1)
+                                .map_or(false, |e| e < descriptor.time_range.1)
                             {
                                 return Ok::<tide::Response, tide::Error>(
                                     json!({
@@ -496,7 +511,7 @@ pub async fn apply_edit_post_variant(
         EditPostVariant::TimeRange(start, end) => {
             if start
                 .checked_add_days(Days::new(7))
-                .map_or(false, |e| &e > end)
+                .map_or(false, |e| &e < end)
             {
                 return Some("Post time out of range".to_string());
             }
