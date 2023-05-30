@@ -906,10 +906,24 @@ pub mod manage {
                 AccountModifyVariant::Organization(org) => attributes.organization = org,
                 AccountModifyVariant::Email(email) => attributes.email = email,
                 AccountModifyVariant::Permission(permissions) => {
-                    if !context.valid(permissions.clone()).await.unwrap_or(false) {
-                        return Err(AccountError::PermissionDeniedError);
-                    }
-                    attributes.permissions = permissions
+                    let am = crate::account::INSTANCE.inner().read().await;
+                    let a = am
+                        .get(
+                            *crate::account::INSTANCE
+                                .index()
+                                .read()
+                                .await
+                                .get(&context.account_id)
+                                .unwrap(),
+                        )
+                        .unwrap()
+                        .read()
+                        .await;
+                    attributes.permissions = a
+                        .permissions()
+                        .into_iter()
+                        .filter(|e| permissions.contains(e))
+                        .collect();
                 }
             },
         }
