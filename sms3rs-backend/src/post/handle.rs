@@ -498,12 +498,24 @@ pub async fn apply_edit_post_variant(
                 }
             }
             for img_id in imgs.iter() {
-                cache
-                    .iter()
-                    .find(|e| e.hash == *img_id)
-                    .unwrap()
-                    .blocked
-                    .store(true, atomic::Ordering::Relaxed)
+                let mut unlock = true;
+                for e in super::INSTANCE.posts.read().await.iter() {
+                    if let Some(er) = e.try_read() {
+                        if er.images.contains(img_id) {
+                            unlock = false;
+                            break;
+                        }
+                    }
+                }
+
+                if unlock {
+                    cache
+                        .iter()
+                        .find(|e| e.hash == *img_id)
+                        .unwrap()
+                        .blocked
+                        .store(true, atomic::Ordering::Relaxed)
+                }
             }
         }
         EditPostVariant::TimeRange(start, end) => {
@@ -542,10 +554,22 @@ pub async fn apply_edit_post_variant(
                 if pr.id == post_id {
                     i = Some(post.0);
                     for img_id in pr.images.iter() {
-                        for im in super::cache::INSTANCE.caches.read().await.iter() {
-                            if &im.hash == img_id {
-                                im.blocked.store(false, atomic::Ordering::Relaxed);
-                                break;
+                        let mut unlock = true;
+                        for e in super::INSTANCE.posts.read().await.iter() {
+                            if let Some(er) = e.try_read() {
+                                if er.images.contains(img_id) {
+                                    unlock = false;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if unlock {
+                            for im in super::cache::INSTANCE.caches.read().await.iter() {
+                                if &im.hash == img_id {
+                                    im.blocked.store(false, atomic::Ordering::Relaxed);
+                                    break;
+                                }
                             }
                         }
                     }

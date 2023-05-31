@@ -2,7 +2,6 @@ use super::*;
 
 use serial_test::serial;
 use sha256::digest;
-use sms3rs_shared::account::Permission;
 use tide_testing::TideTestingExt;
 
 const TEST_POST_IMG: &[u8; 108416] = include_bytes!("../../../test-resources/test_post.png");
@@ -31,7 +30,7 @@ async fn cache_image() {
                 house: Some(sms3rs_shared::account::House::ZhiZhi),
                 phone: 16601550826,
                 organization: None,
-                permissions: vec![Permission::Post],
+                permissions: vec![crate::account::Permission::Post],
                 registration_time: chrono::Utc::now(),
                 registration_ip: Some("127.0.0.1".to_string()),
                 password_sha: digest(password.to_string()),
@@ -101,7 +100,7 @@ async fn new() {
                 house: Some(sms3rs_shared::account::House::ZhiZhi),
                 phone: 16601550826,
                 organization: None,
-                permissions: vec![Permission::Post],
+                permissions: vec![sms3rs_shared::account::Permission::Post],
                 registration_time: chrono::Utc::now(),
                 registration_ip: Some("127.0.0.1".to_string()),
                 password_sha: digest(password.to_string()),
