@@ -65,6 +65,7 @@ pub enum GetPostInfoResult {
         id: u64,
         images: Vec<u64>,
         title: String,
+        archived: bool,
     },
     NotFound(
         /// Target post id

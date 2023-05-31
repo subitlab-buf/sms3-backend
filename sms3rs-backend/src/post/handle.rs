@@ -298,7 +298,7 @@ pub async fn get_posts(mut req: Request<()>) -> tide::Result {
         }
     };
     let descriptor: GetPostsDescriptor = req.body_json().await?;
-    match cxt.valid(vec![]).await {
+    match cxt.valid(vec![Permission::View]).await {
         Ok(able) => {
             if able {
                 let am = account::INSTANCE.inner().read().await;
@@ -368,9 +368,7 @@ fn matches_get_post_filter(filter: &GetPostsFilter, post: &Post, user: &Account)
                 .all(|k| post.metadata.title.contains(k) && post.metadata.description.contains(k))
         }
     }) && (post.publisher == user.id()
-        || (post.metadata.time_range.0 <= date
-            && post.metadata.time_range.1 >= date
-            && user.has_permission(Permission::View))
+        || (post.metadata.time_range.0 <= date && user.has_permission(Permission::View))
         || user.has_permission(Permission::Check))
 }
 
@@ -591,7 +589,7 @@ pub async fn get_posts_info(mut req: Request<()>) -> tide::Result {
         }
     };
     let descriptor: GetPostsInfoDescriptor = req.body_json().await?;
-    match cxt.valid(vec![Permission::Post]).await {
+    match cxt.valid(vec![Permission::View]).await {
         Ok(able) => {
             if able {
                 let am = account::INSTANCE.inner().read().await;
@@ -620,13 +618,13 @@ pub async fn get_posts_info(mut req: Request<()>) -> tide::Result {
                             {
                                 results.push(GetPostInfoResult::Full(er.clone()))
                             } else if er.metadata.time_range.0 <= date
-                                && er.metadata.time_range.1 >= date
                                 && ar.has_permission(Permission::View)
                             {
                                 results.push(GetPostInfoResult::Foreign {
                                     id: er.id,
                                     images: er.images.clone(),
                                     title: er.metadata.title.clone(),
+                                    archived: er.metadata.time_range.1 < date,
                                 })
                             } else {
                                 results.push(GetPostInfoResult::NotFound(er.id))
