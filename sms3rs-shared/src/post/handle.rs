@@ -19,9 +19,36 @@ pub struct GetPostsDescriptor {
 }
 
 #[derive(Serialize, Deserialize)]
+pub enum SimplePostAcceptationStatus {
+    Accepted,
+    Pending,
+    Rejected,
+    Submitted,
+}
+
+impl SimplePostAcceptationStatus {
+    pub fn matches(&self, status: &super::PostAcceptationStatus) -> bool {
+        match self {
+            SimplePostAcceptationStatus::Accepted => {
+                matches!(status, super::PostAcceptationStatus::Accepted(_))
+            }
+            SimplePostAcceptationStatus::Pending => {
+                matches!(status, super::PostAcceptationStatus::Pending)
+            }
+            SimplePostAcceptationStatus::Rejected => {
+                matches!(status, super::PostAcceptationStatus::Rejected(_))
+            }
+            SimplePostAcceptationStatus::Submitted => {
+                matches!(status, super::PostAcceptationStatus::Submitted(_))
+            }
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
 pub enum GetPostsFilter {
     /// Posts that match target status.
-    Acceptation(super::PostAcceptationStatus),
+    Acceptation(SimplePostAcceptationStatus),
     /// Posts published by target account.
     Account(u64),
     After(chrono::NaiveDate),
@@ -38,19 +65,19 @@ pub struct EditPostDescriptor {
 
 #[derive(Serialize, Deserialize)]
 pub enum EditPostVariant {
-    Title(String),
-    Description(String),
-    Images(Vec<u64>),
-    TimeRange(chrono::NaiveDate, chrono::NaiveDate),
     /// Change status of the post to `Pending`
     /// if the target status is `Submitted`.
     CancelSubmission,
+    Description(String),
+    /// Remove the post and unblock all the images it use.
+    Destroy,
+    Images(Vec<u64>),
     RequestReview(
         /// Message to admins.
         String,
     ),
-    /// Remove the post and unblock all the images it use.
-    Destroy,
+    TimeRange(chrono::NaiveDate, chrono::NaiveDate),
+    Title(String),
 }
 
 #[derive(Serialize, Deserialize)]

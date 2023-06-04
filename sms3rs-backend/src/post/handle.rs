@@ -356,9 +356,10 @@ pub async fn get_posts(mut req: Request<()>) -> tide::Result {
 fn matches_get_post_filter(filter: &GetPostsFilter, post: &Post, user: &Account) -> bool {
     let date = Utc::now().date_naive();
     (match filter {
-        GetPostsFilter::Acceptation(status) => {
-            post.status.back().map_or(false, |s| &s.status == status)
-        }
+        GetPostsFilter::Acceptation(status) => post
+            .status
+            .back()
+            .map_or(false, |s| status.matches(&s.status)),
         GetPostsFilter::Account(account) => &post.publisher == account,
         GetPostsFilter::Before(d) => &post.metadata.time_range.0 <= d,
         GetPostsFilter::After(d) => &post.metadata.time_range.0 >= d,
