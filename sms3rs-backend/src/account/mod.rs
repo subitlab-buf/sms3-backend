@@ -321,8 +321,6 @@ pub struct UserAttributes {
     pub permissions: Permissions,
     /// The registration time of this user.
     pub registration_time: DateTime<Utc>,
-    /// The registration ip of this user.
-    pub registration_ip: Option<String>,
     /// Hash of this user's password.
     pub password_sha: String,
     /// The expiration time of a token in days.

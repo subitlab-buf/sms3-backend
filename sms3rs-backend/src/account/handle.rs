@@ -1,84 +1,67 @@
-use super::AccountError;
-use super::UserAttributes;
-use super::UserVerifyVariant;
-use crate::account::verify;
-use crate::account::Permission;
-use crate::account::{Account, AccountManagerError};
-use crate::RequirePermissionContext;
-use async_std::sync::RwLock;
-use chrono::Duration;
-use chrono::Utc;
-use rand::Rng;
-use sha256::digest;
-use std::ops::Deref;
-use std::ops::DerefMut;
-use tide::log::error;
-use tide::log::info;
-use tide::prelude::*;
-use tide::Request;
-
 use sms3rs_shared::account::handle::*;
 
 /// Create an unverified account.
-pub async fn create_account(mut req: Request<()>) -> tide::Result {
+///
+/// Url: `/api/account/create/{email}`
+#[actix_web::get("/api/account/create/{email}")]
+pub async fn create_account(
+    email: actix_web::web::Path<lettre::Address>,
+) -> impl actix_web::Responder {
     let account_manager = &super::INSTANCE;
-    let descriptor: AccountCreateDescriptor = req.body_json().await?;
+
     for account in account_manager.inner().read().await.iter() {
-        if account.read().await.email() == &descriptor.email {
-            return Ok::<tide::Response, tide::Error>(
-                json!({
-                    "status": "error",
-                    "error": "User with this email address already exists",
-                })
-                .into(),
+        if account.read().await.email() == &email {
+            return (
+                format!("Account with email address {email} already exists!"),
+                actix_web::http::StatusCode::CONFLICT,
             );
         }
     }
+
     let len = account_manager.inner().read().await.len();
-    account_manager.inner().write().await.push(RwLock::new({
-        let account = match Account::new(descriptor.email).await {
-            Ok(e) => e,
-            Err(err) => {
-                return Ok::<tide::Response, tide::Error>(
-                    json!({
-                        "status": "error",
-                        "error": AccountManagerError::Account(0, err).to_string(),
-                    })
-                    .into(),
-                );
+    account_manager
+        .inner()
+        .write()
+        .await
+        .push(tokio::sync::RwLock::new({
+            let account = match crate::account::Account::new(email.into_inner()).await {
+                Ok(e) => e,
+                Err(err) => return (err.to_string(), actix_web::http::StatusCode::OK),
+            };
+
+            account_manager
+                .index()
+                .write()
+                .await
+                .insert(account.id(), len);
+
+            if !account.save().await {
+                tracing::error!("Error while saving account {}", account.email());
             }
-        };
-        info!(
-            "Unverified account created: {} (id {})",
-            account.email(),
-            account.id()
-        );
-        account_manager
-            .index()
-            .write()
-            .await
-            .insert(account.id(), len);
-        if !account.save().await {
-            error!("Error while saving account {}", account.email());
-        }
-        account
-    }));
-    Ok::<tide::Response, tide::Error>(
-        json!({
-            "status": "success",
-        })
-        .into(),
-    )
+
+            account
+        }));
+
+    (String::new(), actix_web::http::StatusCode::OK)
 }
 
 /// Verify an account.
-pub async fn verify_account(mut req: Request<()>) -> tide::Result {
+///
+/// Url: `/api/account/verify/{email}`
+///
+/// Request body: See [`AccountVerifyDescriptor`].
+///
+/// Response: `200` with `account_id` (type: number) in json.
+#[actix_web::post("/api/account/verify/{email}")]
+pub async fn verify_account(
+    email: actix_web::web::Path<lettre::Address>,
+    descriptor: actix_web::web::Json<AccountVerifyDescriptor>,
+) -> impl actix_web::Responder {
     let account_manager = &super::INSTANCE;
-    let descriptor: AccountVerifyDescriptor = req.body_json().await?;
+
     for account in account_manager.inner().read().await.iter() {
         match &descriptor.variant {
             AccountVerifyVariant::Activate {
-                email,
                 name,
                 id,
                 phone,
@@ -86,7 +69,7 @@ pub async fn verify_account(mut req: Request<()>) -> tide::Result {
                 organization,
                 password,
             } => {
-                let res = {
+                if {
                     let a = account.read().await;
                     if a.email() == email {
                         let id = a.id();
@@ -96,48 +79,43 @@ pub async fn verify_account(mut req: Request<()>) -> tide::Result {
                     } else {
                         false
                     }
-                };
-                if res {
+                } {
                     let mut a = account.write().await;
                     if let Err(err) = a.verify(
                         descriptor.code,
-                        super::AccountVerifyVariant::Activate(UserAttributes {
-                            email: email.clone(),
+                        super::AccountVerifyVariant::Activate(crate::account::UserAttributes {
+                            email: email.into_inner(),
                             name: name.clone(),
                             school_id: *id,
                             phone: *phone,
                             house: *house,
                             organization: organization.clone(),
-                            permissions: vec![Permission::View, Permission::Post],
-                            registration_time: Utc::now(),
-                            registration_ip: req.remote().map(|s| s.to_string()),
-                            password_sha: digest(password as &str),
+                            permissions: vec![
+                                sms3rs_shared::account::Permission::View,
+                                sms3rs_shared::account::Permission::Post,
+                            ],
+                            registration_time: chrono::Utc::now(),
+                            password_sha: sha256::digest(password as &str),
+                            // yes, 5's default token expire time
                             token_expiration_time: 5,
                         }),
                     ) {
-                        return Ok::<tide::Response, tide::Error>(
-                            json!({
-                                "status": "error",
-                                "error": AccountManagerError::Account(a.id(), err).to_string(),
-                            })
-                            .into(),
-                        );
+                        return (err.to_string(), actix_web::http::StatusCode::UNAUTHORIZED);
                     }
+
                     if !a.save().await {
-                        error!("Error when saving account {}", a.email());
+                        tracing::error!("Error when saving account {}", a.email());
                     }
-                    info!("Account verified: {} (id: {})", a.email(), a.id());
-                    return Ok::<tide::Response, tide::Error>(
-                        json!({
-                            "status": "success",
-                            "account_id": a.id(),
-                        })
-                        .into(),
+
+                    return (
+                        serde_json::to_string(&serde_json::json!({ "account_id": a.id() }))
+                            .unwrap(),
+                        actix_web::http::StatusCode::OK,
                     );
                 }
             }
-            AccountVerifyVariant::ResetPassword { email, password } => {
-                let res = {
+            AccountVerifyVariant::ResetPassword(password) => {
+                if {
                     let a = account.read().await;
                     if a.email() == email {
                         let id = a.id();
@@ -147,79 +125,76 @@ pub async fn verify_account(mut req: Request<()>) -> tide::Result {
                     } else {
                         false
                     }
-                };
-                if res {
+                } {
                     let mut a = account.write().await;
+
                     if let Err(err) = a.verify(
                         descriptor.code,
                         super::AccountVerifyVariant::ResetPassword(password.to_string()),
                     ) {
-                        return Ok::<tide::Response, tide::Error>(
-                            json!({
-                                "status": "error",
-                                "error": AccountManagerError::Account(a.id(), err).to_string(),
-                            })
-                            .into(),
-                        );
+                        return (err.to_string(), actix_web::http::StatusCode::UNAUTHORIZED);
                     }
+
                     if !a.save().await {
-                        error!("Error when saving account {}", a.email());
+                        tracing::error!("Error when saving account {}", a.email());
                     }
-                    info!("Password reseted: {} (id: {})", a.email(), a.id());
-                    return Ok::<tide::Response, tide::Error>(
-                        json!({
-                            "status": "success",
-                        })
-                        .into(),
-                    );
+
+                    return (String::new(), actix_web::http::StatusCode::OK);
                 }
             }
         }
     }
-    Ok::<tide::Response, tide::Error>(
-        json!({
-            "status": "error",
-            "error": "Target account not found",
-        })
-        .into(),
+
+    (
+        "Target account not found",
+        actix_web::http::StatusCode::NOT_FOUND,
     )
 }
 
 /// Login to a verified account.
-pub async fn login_account(mut req: Request<()>) -> tide::Result {
+///
+/// Url: `/api/account/login/{email}`
+///
+/// Request body: See [`AccountLoginDescriptor`].
+///
+/// Response: `200` with `{ "account_id": _, "token": _ }` in json.
+#[actix_web::post("/api/account/login/{email}")]
+pub async fn login_account(
+    email: actix_web::web::Path<lettre::Address>,
+    descriptor: actix_web::web::Json<AccountLoginDescriptor>,
+) -> impl actix_web::Responder {
     let account_manager = &super::INSTANCE;
-    let descriptor: AccountLoginDescriptor = req.body_json().await?;
+
     for account in account_manager.inner().read().await.iter() {
-        if account.read().await.email() == &descriptor.email {
+        if account.read().await.email() == &email {
             let mut aw = account.write().await;
             let token = aw.login(&descriptor.password);
+
             if !aw.save().await {
-                error!("Error when saving account {}", aw.email());
+                tracing::error!("Error when saving account {}", aw.email());
             }
-            return Ok::<tide::Response, tide::Error>(match token {
+
+            match token {
                 Ok(t) => {
-                    info!("Account {} (id: {}) logged in", aw.email(), aw.id());
-                    json!({
-                        "status": "success",
-                        "account_id": aw.id(),
-                        "token": t,
-                    })
+                    return (
+                        serde_json::to_string(&serde_json::json!({
+                            "account_id": aw.id(),
+                            "token": t,
+                        }))
+                        .unwrap(),
+                        actix_web::http::StatusCode::OK,
+                    );
                 }
-                .into(),
-                Err(err) => json!({
-                    "status": "error",
-                    "error": err.to_string(),
-                })
-                .into(),
-            });
+                Err(err) => {
+                    return (err.to_string(), actix_web::http::StatusCode::UNAUTHORIZED);
+                }
+            };
         }
     }
-    Ok::<tide::Response, tide::Error>(
-        json!({
-            "status": "error",
-            "error": "Target account not found",
-        })
-        .into(),
+
+    (
+        "Target account not found".to_string(),
+        actix_web::http::StatusCode::NOT_FOUND,
     )
 }
 

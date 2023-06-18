@@ -252,6 +252,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "anyhow"
+version = "1.0.71"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9c7d0618f0e0b7e8ff11427422b64564d5fb0be1940354bfe2e0529b18a9d9b8"
+
+[[package]]
 name = "async-trait"
 version = "0.1.68"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1687,6 +1693,7 @@ name = "sms3rs-backend"
 version = "0.1.0"
 dependencies = [
  "actix-web",
+ "anyhow",
  "chrono",
  "image",
  "lettre",
@@ -1699,6 +1706,7 @@ dependencies = [
  "sms3rs-shared",
  "tokio",
  "toml",
+ "tracing",
 ]
 
 [[package]]
@@ -1926,7 +1934,19 @@ dependencies = [
  "cfg-if",
  "log",
  "pin-project-lite",
+ "tracing-attributes",
  "tracing-core",
+]
+
+[[package]]
+name = "tracing-attributes"
+version = "0.1.24"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0f57e3ca2a01450b1a921183a9c9cbfda207fd822cef4ccb00a65402cbba7a74"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.18",
 ]
 
 [[package]]

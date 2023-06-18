@@ -1,11 +1,6 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
-pub struct AccountCreateDescriptor {
-    pub email: lettre::Address,
-}
-
-#[derive(Serialize, Deserialize)]
 pub struct AccountVerifyDescriptor {
     pub code: u32,
     pub variant: AccountVerifyVariant,
@@ -15,7 +10,6 @@ pub struct AccountVerifyDescriptor {
 pub enum AccountVerifyVariant {
     /// Activate an unverified account.
     Activate {
-        email: lettre::Address,
         name: String,
         id: u32,
         phone: u64,
@@ -24,15 +18,11 @@ pub enum AccountVerifyVariant {
         password: String,
     },
     /// Verify a resetpassword session.
-    ResetPassword {
-        email: lettre::Address,
-        password: String,
-    },
+    ResetPassword(String),
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct AccountLoginDescriptor {
-    pub email: lettre::Address,
     pub password: String,
 }
 
