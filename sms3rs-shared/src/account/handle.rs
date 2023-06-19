@@ -1,6 +1,11 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
+pub struct EmailTarget {
+    pub email: lettre::Address,
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct AccountVerifyDescriptor {
     pub code: u32,
     pub variant: AccountVerifyVariant,
@@ -38,7 +43,6 @@ pub struct ViewAccountResult {
     pub metadata: super::UserMetadata,
     pub permissions: super::Permissions,
     pub registration_time: chrono::DateTime<chrono::Utc>,
-    pub registration_ip: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -55,11 +59,6 @@ pub enum AccountEditVariant {
     Organization(Option<String>),
     Password { old: String, new: String },
     TokenExpireTime(u16),
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct ResetPasswordDescriptor {
-    pub email: lettre::Address,
 }
 
 pub mod manage {
@@ -90,7 +89,7 @@ pub mod manage {
     }
 
     #[derive(Serialize, Deserialize)]
-    pub struct AccountModifyDescriptor {
+    pub struct ModifyAccountDescriptor {
         pub account_id: u64,
         pub variants: Vec<AccountModifyVariant>,
     }

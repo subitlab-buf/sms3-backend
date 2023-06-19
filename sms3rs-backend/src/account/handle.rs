@@ -1,11 +1,15 @@
+use std::ops::{Deref, DerefMut};
+
+use rand::Rng;
 use sms3rs_shared::account::handle::*;
 
 /// Create an unverified account.
+/// POST only.
 ///
-/// Url: `/api/account/create/{email}`
-#[actix_web::get("/api/account/create/{email}")]
+/// Url: `/api/account/create/?email={email}`
+#[actix_web::post("/api/account/create")]
 pub async fn create_account(
-    email: actix_web::web::Path<lettre::Address>,
+    actix_web::web::Query(EmailTarget { email }): actix_web::web::Query<EmailTarget>,
 ) -> impl actix_web::Responder {
     let account_manager = &super::INSTANCE;
 
@@ -24,7 +28,7 @@ pub async fn create_account(
         .write()
         .await
         .push(tokio::sync::RwLock::new({
-            let account = match crate::account::Account::new(email.into_inner()).await {
+            let account = match crate::account::Account::new(email).await {
                 Ok(e) => e,
                 Err(err) => return (err.to_string(), actix_web::http::StatusCode::OK),
             };
@@ -47,14 +51,14 @@ pub async fn create_account(
 
 /// Verify an account.
 ///
-/// Url: `/api/account/verify/{email}`
+/// Url: `/api/account/verify/?email={email}`
 ///
-/// Request body: See [`AccountVerifyDescriptor`].
+/// Request body: See [`AccountVerifyDescriptor`]. (json)
 ///
 /// Response: `200` with `account_id` (type: number) in json.
 #[actix_web::post("/api/account/verify/{email}")]
 pub async fn verify_account(
-    email: actix_web::web::Path<lettre::Address>,
+    actix_web::web::Query(EmailTarget { email }): actix_web::web::Query<EmailTarget>,
     descriptor: actix_web::web::Json<AccountVerifyDescriptor>,
 ) -> impl actix_web::Responder {
     let account_manager = &super::INSTANCE;
@@ -71,7 +75,7 @@ pub async fn verify_account(
             } => {
                 if {
                     let a = account.read().await;
-                    if a.email() == email {
+                    if a.email() == &email {
                         let id = a.id();
                         drop(a);
                         account_manager.refresh(id).await;
@@ -84,7 +88,7 @@ pub async fn verify_account(
                     if let Err(err) = a.verify(
                         descriptor.code,
                         super::AccountVerifyVariant::Activate(crate::account::UserAttributes {
-                            email: email.into_inner(),
+                            email,
                             name: name.clone(),
                             school_id: *id,
                             phone: *phone,
@@ -117,7 +121,7 @@ pub async fn verify_account(
             AccountVerifyVariant::ResetPassword(password) => {
                 if {
                     let a = account.read().await;
-                    if a.email() == email {
+                    if a.email() == &email {
                         let id = a.id();
                         drop(a);
                         account_manager.refresh(id).await;
@@ -146,21 +150,21 @@ pub async fn verify_account(
     }
 
     (
-        "Target account not found",
+        "Target account not found".to_string(),
         actix_web::http::StatusCode::NOT_FOUND,
     )
 }
 
 /// Login to a verified account.
 ///
-/// Url: `/api/account/login/{email}`
+/// Url: `/api/account/login/?email={email}`
 ///
-/// Request body: See [`AccountLoginDescriptor`].
+/// Request body: See [`AccountLoginDescriptor`]. (json)
 ///
 /// Response: `200` with `{ "account_id": _, "token": _ }` in json.
 #[actix_web::post("/api/account/login/{email}")]
 pub async fn login_account(
-    email: actix_web::web::Path<lettre::Address>,
+    actix_web::web::Query(EmailTarget { email }): actix_web::web::Query<EmailTarget>,
     descriptor: actix_web::web::Json<AccountLoginDescriptor>,
 ) -> impl actix_web::Responder {
     let account_manager = &super::INSTANCE;
@@ -198,73 +202,53 @@ pub async fn login_account(
     )
 }
 
-/// Logout from an account.
-pub async fn logout_account(req: Request<()>) -> tide::Result {
+/// Logout an account.
+/// POST only.
+///
+/// Url: `/api/account/logout`
+///
+/// Request header: See [`crate::RequestPermissionContext`].
+#[actix_web::post("/api/account/logout")]
+pub async fn logout_account(
+    cxt: actix_web::web::Header<crate::RequirePermissionContext>,
+) -> impl actix_web::Responder {
     let account_manager = &super::INSTANCE;
-    let cxt = match RequirePermissionContext::from_header(&req) {
-        Some(e) => e,
-        None => {
-            return Ok::<tide::Response, tide::Error>(
-                json!({
-                    "status": "error",
-                    "error": "Permission denied",
-                })
-                .into(),
-            )
-        }
-    };
     match account_manager.index().read().await.get(&cxt.account_id) {
         Some(index) => {
             let b = account_manager.inner().read().await;
             let mut aw = b.get(*index).unwrap().write().await;
             match aw.logout(&cxt.token) {
-                Err(err) => Ok::<tide::Response, tide::Error>(
-                    json!({
-                        "status": "error",
-                        "error": err.to_string(),
-                    })
-                    .into(),
-                ),
                 Ok(_) => {
                     if !aw.save().await {
-                        error!("Error when saving account {}", aw.email());
+                        tracing::error!("Error when saving account {}", aw.email());
                     }
-                    info!("Account {} (id: {}) logged out", aw.email(), aw.id());
-                    Ok::<tide::Response, tide::Error>(
-                        json!({
-                            "status": "success",
-                        })
-                        .into(),
-                    )
+                    return (String::new(), actix_web::http::StatusCode::OK);
                 }
+                Err(err) => return (err.to_string(), actix_web::http::StatusCode::UNAUTHORIZED),
             }
         }
-        None => Ok::<tide::Response, tide::Error>(
-            json!({
-                "status": "error",
-                "error": "Target account not found",
-            })
-            .into(),
-        ),
+        None => {
+            return (
+                "Target account not found".to_string(),
+                actix_web::http::StatusCode::NOT_FOUND,
+            )
+        }
     }
 }
 
-/// Sign out and remove an verified account.
-pub async fn sign_out_account(mut req: Request<()>) -> tide::Result {
+/// Log out and remove an verified account.
+///
+/// Url: `/api/account/signout`
+///
+/// Request header: See [`crate::RequestPermissionContext`].
+///
+/// Request body: See [`AccountSignOutDescriptor`]. (json)
+#[actix_web::post("/api/account/signout")]
+pub async fn sign_out_account(
+    cxt: actix_web::web::Header<crate::RequirePermissionContext>,
+    descriptor: actix_web::web::Json<AccountSignOutDescriptor>,
+) -> impl actix_web::Responder {
     let account_manager = &super::INSTANCE;
-    let cxt = match RequirePermissionContext::from_header(&req) {
-        Some(e) => e,
-        None => {
-            return Ok::<tide::Response, tide::Error>(
-                json!({
-                    "status": "error",
-                    "error": "Permission denied",
-                })
-                .into(),
-            )
-        }
-    };
-    let descriptor: AccountSignOutDescriptor = req.body_json().await?;
     if match account_manager
         .inner()
         .read()
@@ -273,12 +257,9 @@ pub async fn sign_out_account(mut req: Request<()>) -> tide::Result {
             match account_manager.index().read().await.get(&cxt.account_id) {
                 Some(e) => *e,
                 _ => {
-                    return Ok::<tide::Response, tide::Error>(
-                        json!({
-                            "status": "error",
-                            "error": "Target account not found",
-                        })
-                        .into(),
+                    return (
+                        "Target account not found".to_string(),
+                        actix_web::http::StatusCode::NOT_FOUND,
                     )
                 }
             },
@@ -288,57 +269,42 @@ pub async fn sign_out_account(mut req: Request<()>) -> tide::Result {
         .await
         .deref()
     {
-        Account::Unverified(_) => {
-            return Ok::<tide::Response, tide::Error>(
-                json!({
-                    "status": "error",
-                    "error": "Account unverified"
-                })
-                .into(),
+        crate::account::Account::Unverified(_) => {
+            return (
+                "Account unverified".to_string(),
+                actix_web::http::StatusCode::FORBIDDEN,
             )
         }
-        Account::Verified {
+        crate::account::Account::Verified {
             attributes, tokens, ..
         } => {
-            digest(descriptor.password) == attributes.password_sha
+            sha256::digest(descriptor.password.as_str()) == attributes.password_sha
                 && tokens.token_usable(&cxt.token)
         }
     } {
         account_manager.remove(cxt.account_id).await;
-        info!("Account {} signed out", cxt.account_id);
-        Ok::<tide::Response, tide::Error>(
-            json!({
-                "status": "success",
-            })
-            .into(),
-        )
+        (String::new(), actix_web::http::StatusCode::OK)
     } else {
-        Ok::<tide::Response, tide::Error>(
-            json!({
-                "status": "error",
-                "error": "Password incorrect"
-            })
-            .into(),
+        (
+            "Password incorrect".to_string(),
+            actix_web::http::StatusCode::UNAUTHORIZED,
         )
     }
 }
 
 /// Get a user's account details.
-pub async fn view_account(req: Request<()>) -> tide::Result {
+///
+/// Url: `/api/account/view`
+///
+/// Request header: See [`crate::RequirePermissionContext`].
+///
+/// Response body: See [`ViewAccountResult`].
+#[actix_web::get("/api/account/view")]
+pub async fn view_account(
+    cxt: actix_web::web::Header<crate::RequirePermissionContext>,
+) -> impl actix_web::Responder {
     let account_manager = &super::INSTANCE;
-    let context = match RequirePermissionContext::from_header(&req) {
-        Some(e) => e,
-        None => {
-            return Ok::<tide::Response, tide::Error>(
-                json!({
-                    "status": "error",
-                    "error": "Permission denied",
-                })
-                .into(),
-            )
-        }
-    };
-    match context.valid(vec![]).await {
+    match cxt.valid(vec![]).await {
         Ok(_) => {
             let b = account_manager.inner().read().await;
             let a = b
@@ -347,57 +313,44 @@ pub async fn view_account(req: Request<()>) -> tide::Result {
                         .index()
                         .read()
                         .await
-                        .get(&context.account_id)
+                        .get(&cxt.account_id)
                         .unwrap(),
                 )
                 .unwrap()
                 .read()
                 .await;
             match a.deref() {
-                Account::Unverified(_) => unreachable!(),
-                Account::Verified { attributes, .. } => {
-                    let result = ViewAccountResult {
+                crate::account::Account::Unverified(_) => unreachable!(),
+                crate::account::Account::Verified { attributes, .. } => (
+                    serde_json::to_string(&ViewAccountResult {
                         id: a.id(),
                         metadata: a.metadata().unwrap(),
                         permissions: a.permissions(),
                         registration_time: attributes.registration_time,
-                        registration_ip: attributes.registration_ip.clone(),
-                    };
-                    Ok(json!({
-                        "status": "success",
-                        "result": result,
                     })
-                    .into())
-                }
+                    .unwrap(),
+                    actix_web::http::StatusCode::OK,
+                ),
             }
         }
-        Err(err) => Ok::<tide::Response, tide::Error>(
-            json!({
-                "status": "error",
-                "error": err.to_string(),
-            })
-            .into(),
-        ),
+        Err(err) => (err.to_string(), actix_web::http::StatusCode::UNAUTHORIZED),
     }
 }
 
 /// Edit account metadata.
-pub async fn edit_account(mut req: Request<()>) -> tide::Result {
+///
+/// Url: `/api/account/edit`
+///
+/// Request header: See [`crate::RequirePermissionContext`].
+///
+/// Request body: See [`AccountEditDescriptor`].
+#[actix_web::post("/api/account/edit")]
+pub async fn edit_account(
+    cxt: actix_web::web::Header<crate::RequirePermissionContext>,
+    descriptor: actix_web::web::Json<AccountEditDescriptor>,
+) -> impl actix_web::Responder {
     let account_manager = &super::INSTANCE;
-    let context = match RequirePermissionContext::from_header(&req) {
-        Some(e) => e,
-        None => {
-            return Ok::<tide::Response, tide::Error>(
-                json!({
-                    "status": "error",
-                    "error": "Permission denied",
-                })
-                .into(),
-            )
-        }
-    };
-    let descriptor: AccountEditDescriptor = req.body_json().await?;
-    match context.valid(vec![]).await {
+    match cxt.valid(vec![]).await {
         Ok(_) => {
             let b = account_manager.inner().read().await;
             let mut a = b
@@ -406,63 +359,46 @@ pub async fn edit_account(mut req: Request<()>) -> tide::Result {
                         .index()
                         .read()
                         .await
-                        .get(&context.account_id)
+                        .get(&cxt.account_id)
                         .unwrap(),
                 )
                 .unwrap()
                 .write()
                 .await;
-            for variant in descriptor.variants {
+
+            for variant in descriptor.into_inner().variants {
                 match apply_edit_variant(variant, a.deref_mut()) {
                     Ok(_) => (),
-                    Err(err) => {
-                        return Ok::<tide::Response, tide::Error>(
-                            json!({
-                                "status": "error",
-                                "error": err.to_string(),
-                            })
-                            .into(),
-                        )
-                    }
+                    Err(err) => return (err.to_string(), actix_web::http::StatusCode::FORBIDDEN),
                 }
             }
+
             if !a.save().await {
-                error!("Error when saving account {}", a.email());
+                tracing::error!("Error when saving account {}", a.email());
             }
-            Ok::<tide::Response, tide::Error>(
-                json!({
-                    "status": "success",
-                })
-                .into(),
-            )
+
+            (String::new(), actix_web::http::StatusCode::OK)
         }
-        Err(err) => Ok::<tide::Response, tide::Error>(
-            json!({
-                "status": "error",
-                "error": err.to_string(),
-            })
-            .into(),
-        ),
+        Err(err) => (err.to_string(), actix_web::http::StatusCode::UNAUTHORIZED),
     }
 }
 
-pub fn apply_edit_variant(
-    mt: AccountEditVariant,
-    account: &mut Account,
-) -> Result<(), AccountError> {
+/// Apply an [`AccountEditVariant`] to an account.
+/// Not a request handling method.
+fn apply_edit_variant(mt: AccountEditVariant, account: &mut super::Account) -> anyhow::Result<()> {
     match account {
-        Account::Unverified(_) => return Err(AccountError::UserUnverifiedError),
-        Account::Verified { attributes, .. } => match mt {
+        super::Account::Unverified(_) => return Err(anyhow::anyhow!("Account unverified")),
+        super::Account::Verified { attributes, .. } => match mt {
             AccountEditVariant::Name(name) => attributes.name = name,
             AccountEditVariant::SchoolId(id) => attributes.school_id = id,
             AccountEditVariant::Phone(phone) => attributes.phone = phone,
             AccountEditVariant::House(house) => attributes.house = house,
             AccountEditVariant::Organization(org) => attributes.organization = org,
             AccountEditVariant::Password { old, new } => {
-                if attributes.password_sha == digest(old) {
-                    attributes.password_sha = digest(new)
+                if attributes.password_sha == sha256::digest(old) {
+                    attributes.password_sha = sha256::digest(new)
                 } else {
-                    return Err(AccountError::PasswordIncorrectError);
+                    return Err(anyhow::anyhow!("Old password incorrect"));
                 }
             }
             AccountEditVariant::TokenExpireTime(time) => attributes.token_expiration_time = time,
@@ -472,134 +408,107 @@ pub fn apply_edit_variant(
 }
 
 /// Initialize a reset password verification.
-pub async fn reset_password(mut req: Request<()>) -> tide::Result {
+///
+/// Url: `/api/account/reset-password/?email={email}`
+#[actix_web::post("/api/account/reset-password")]
+pub async fn reset_password(
+    actix_web::web::Query(EmailTarget { email }): actix_web::web::Query<EmailTarget>,
+) -> impl actix_web::Responder {
     let account_manager = &super::INSTANCE;
-    let descriptor: ResetPasswordDescriptor = req.body_json().await?;
     for account in account_manager.inner().read().await.iter() {
         let ar = account.read().await;
-        if ar.email() == &descriptor.email {
-            return match ar.deref() {
-                Account::Unverified(_) => Ok(json!({
-                    "status": "error",
-                    "error": "Target account is unverified",
-                })
-                .into()),
-                Account::Verified { verify, .. } => {
-                    if matches!(verify, UserVerifyVariant::None) {
+        if ar.email() == &email {
+            match ar.deref() {
+                crate::account::Account::Unverified(_) => {
+                    return (
+                        "Account unverified".to_string(),
+                        actix_web::http::StatusCode::FORBIDDEN,
+                    )
+                }
+                crate::account::Account::Verified { verify, .. } => {
+                    if matches!(verify, crate::account::UserVerifyVariant::None) {
                         drop(ar);
                         let mut aw = account.write().await;
                         let e = match aw.deref_mut() {
-                            Account::Unverified(_) => unreachable!(),
-                            Account::Verified { verify, .. } => {
-                                *verify = UserVerifyVariant::ForgetPassword({
-                                    let cxt = verify::Context {
-                                        email: descriptor.email,
-                                        code: {
-                                            let mut rng = rand::thread_rng();
-                                            rng.gen_range(100000..999999)
-                                        },
-                                        expire_time: match Utc::now()
-                                            .naive_utc()
-                                            .checked_add_signed(Duration::minutes(15))
-                                        {
-                                            Some(e) => e,
-                                            _ => {
-                                                return Ok(json!({
-                                                    "status": "error",
-                                                    "error": "Date out of range",
-                                                })
-                                                .into())
-                                            }
-                                        },
-                                    };
-                                    match cxt.send_verify().await {
-                                        Ok(_) => (),
-                                        Err(err) => {
-                                            let e = format!(
-                                                "Error while sending verification mail: {}",
-                                                err
-                                            );
-                                            return Ok(json!({
-                                                "status": "error",
-                                                "error": e,
-                                            })
-                                            .into());
+                            crate::account::Account::Unverified(_) => unreachable!(),
+                            crate::account::Account::Verified { verify, .. } => {
+                                *verify =
+                                    crate::account::UserVerifyVariant::ForgetPassword({
+                                        let cxt = crate::account::verify::Context {
+                                            email,
+                                            code: {
+                                                let mut rng = rand::thread_rng();
+                                                rng.gen_range(100000..999999)
+                                            },
+                                            expire_time: chrono::Utc::now().naive_utc()
+                                                + chrono::Duration::minutes(15),
+                                        };
+                                        match cxt.send_verify().await {
+                                            Ok(_) => (),
+                                            Err(err) => return (
+                                                format!("(smtp error) {err}"),
+                                                actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
+                                            ),
                                         }
-                                    }
-                                    cxt
-                                });
-                                Ok(json!({
-                                    "status": "success",
-                                })
-                                .into())
+                                        cxt
+                                    });
+                                (String::new(), actix_web::http::StatusCode::OK)
                             }
                         };
                         if !aw.save().await {
-                            error!("Error when saving account {}", aw.email());
+                            tracing::error!("Error when saving account {}", aw.email());
                         }
-                        e
+                        return e;
                     } else {
-                        Ok(json!({
-                            "status": "error",
-                            "error": "Target account is during verification period",
-                        })
-                        .into())
+                        return (
+                            "Target account is during verification period".to_string(),
+                            actix_web::http::StatusCode::FORBIDDEN,
+                        );
                     }
                 }
             };
         }
     }
 
-    Ok(json!({
-        "status": "error",
-        "error": "Target account not found",
-    })
-    .into())
+    (
+        "Target account not found".to_string(),
+        actix_web::http::StatusCode::NOT_FOUND,
+    )
 }
 
 /// Manage accounts for admins.
 pub mod manage {
-    use crate::account::verify::Tokens;
-    use crate::account::{self, AccountError, Permission};
-    use crate::account::{Account, UserAttributes};
-    use crate::RequirePermissionContext;
-    use async_std::sync::RwLock;
-    use chrono::Utc;
-    use sha256::digest;
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-    use std::ops::{Deref, DerefMut};
-    use tide::log::{error, info};
-    use tide::prelude::*;
-    use tide::Request;
+    use std::{
+        hash::{Hash, Hasher},
+        ops::{Deref, DerefMut},
+    };
 
     use sms3rs_shared::account::handle::manage::*;
 
     /// Let admin creating accounts.
-    pub async fn make_account(mut req: Request<()>) -> tide::Result {
-        let account_manager = &account::INSTANCE;
-        let context = match RequirePermissionContext::from_header(&req) {
-            Some(e) => e,
-            None => {
-                return Ok::<tide::Response, tide::Error>(
-                    json!({
-                        "status": "error",
-                        "error": "Permission denied",
-                    })
-                    .into(),
-                )
-            }
-        };
-        let descriptor: MakeAccountDescriptor = req.body_json().await?;
-        match context.valid(vec![Permission::ManageAccounts]).await {
+    ///
+    /// Url: `/api/account/manage/create`
+    ///
+    /// Request header: See [`crate::RequirePermissionContext`].
+    ///
+    /// Request body: See [`MakeAccountDescriptor`]. (json)
+    ///
+    /// Response body: `200` with `{ "account_id": _ }`.
+    #[actix_web::post("/api/account/manage/create")]
+    pub async fn make_account(
+        cxt: actix_web::web::Header<crate::RequirePermissionContext>,
+        descriptor: actix_web::web::Json<MakeAccountDescriptor>,
+    ) -> impl actix_web::Responder {
+        let account_manager = &crate::account::INSTANCE;
+        match cxt
+            .valid(vec![sms3rs_shared::account::Permission::ManageAccounts])
+            .await
+        {
             Ok(able) => {
                 if !able {
-                    return Ok::<tide::Response, tide::Error>(
-                        json!({
-                            "status": "error",
-                            "error": "Permission denied",
-                        })
-                        .into(),
+                    return (
+                        "Permission denied".to_string(),
+                        actix_web::http::StatusCode::FORBIDDEN,
                     );
                 }
                 let mut b = account_manager.inner().write().await;
@@ -609,25 +518,26 @@ pub mod manage {
                             .index()
                             .read()
                             .await
-                            .get(&context.account_id)
+                            .get(&cxt.account_id)
                             .unwrap(),
                     )
                     .unwrap()
                     .read()
                     .await;
-                let account = Account::Verified {
+
+                let account = crate::account::Account::Verified {
                     id: {
-                        let mut hasher = DefaultHasher::new();
+                        let mut hasher = std::collections::hash_map::DefaultHasher::new();
                         descriptor.email.hash(&mut hasher);
                         hasher.finish()
                     },
-                    attributes: UserAttributes {
-                        email: descriptor.email,
-                        name: descriptor.name,
+                    attributes: crate::account::UserAttributes {
+                        email: descriptor.email.clone(),
+                        name: descriptor.name.clone(),
                         school_id: descriptor.school_id,
                         phone: descriptor.phone,
                         house: descriptor.house,
-                        organization: descriptor.organization,
+                        organization: descriptor.organization.clone(),
                         permissions: descriptor
                             .permissions
                             .iter()
@@ -635,85 +545,78 @@ pub mod manage {
                             .filter(|e| a.has_permission(**e))
                             .copied()
                             .collect(),
-                        registration_time: Utc::now(),
-                        registration_ip: req.remote().map(|e| e.to_string()),
-                        password_sha: digest(descriptor.password),
+                        registration_time: chrono::Utc::now(),
+                        password_sha: sha256::digest(descriptor.password.as_str()),
                         token_expiration_time: 5,
                     },
-                    tokens: Tokens::new(),
-                    verify: account::UserVerifyVariant::None,
+                    tokens: crate::account::verify::Tokens::new(),
+                    verify: crate::account::UserVerifyVariant::None,
                 };
+
                 drop(a);
+
                 if account_manager
                     .index()
                     .read()
                     .await
                     .contains_key(&account.id())
                 {
-                    return Ok::<tide::Response, tide::Error>(
-                        json!({
-                            "status": "error",
-                            "error": "Account already exist"
-                        })
-                        .into(),
+                    return (
+                        "Account already exist".to_string(),
+                        actix_web::http::StatusCode::CONFLICT,
                     );
                 }
+
                 account_manager
                     .index()
                     .write()
                     .await
                     .insert(account.id(), b.len());
+
                 if !account.save().await {
-                    error!("Error when saving account {}", account.email());
+                    tracing::error!("Error when saving account {}", account.email());
                 }
-                info!("Account {} (id: {}) built", account.email(), account.id());
+
                 let id = account.id();
-                b.push(RwLock::new(account));
-                Ok::<tide::Response, tide::Error>(
-                    json!({
-                        "status": "success",
-                        "account_id": id,
-                    })
-                    .into(),
+                b.push(tokio::sync::RwLock::new(account));
+
+                (
+                    serde_json::to_string(&serde_json::json!({ "account_id": id })).unwrap(),
+                    actix_web::http::StatusCode::OK,
                 )
             }
-            Err(err) => Ok::<tide::Response, tide::Error>(
-                json!({
-                    "status": "error",
-                    "error": err.to_string(),
-                })
-                .into(),
-            ),
+            Err(err) => (err.to_string(), actix_web::http::StatusCode::UNAUTHORIZED),
         }
     }
 
-    /// View an account.
-    pub async fn view_account(mut req: Request<()>) -> tide::Result {
-        let account_manager = &account::INSTANCE;
-        let context = match RequirePermissionContext::from_header(&req) {
-            Some(e) => e,
-            None => {
-                return Ok::<tide::Response, tide::Error>(
-                    json!({
-                        "status": "error",
-                        "error": "Permission denied",
-                    })
-                    .into(),
-                )
-            }
-        };
-        let descriptor: ViewAccountDescriptor = req.body_json().await?;
-        match context.valid(vec![Permission::ViewAccounts]).await {
+    /// View accounts.
+    ///
+    /// Url: `/api/account/manage/view`
+    ///
+    /// Request header: See [`crate::RequirePermissionContext`].
+    ///
+    /// Request body: See [`ViewAccountDescriptor`].
+    ///
+    /// Response body: `200` with `{ "results": Vec<ViewAccountResult> }`,
+    /// also see [`ViewAccountResult`].
+    #[actix_web::post("/api/account/manage/view")]
+    pub async fn view_account(
+        cxt: actix_web::web::Header<crate::RequirePermissionContext>,
+        descriptor: actix_web::web::Json<ViewAccountDescriptor>,
+    ) -> impl actix_web::Responder {
+        let account_manager = &crate::account::INSTANCE;
+        match cxt
+            .valid(vec![sms3rs_shared::account::Permission::ViewAccounts])
+            .await
+        {
             Ok(able) => {
                 if !able {
-                    return Ok::<tide::Response, tide::Error>(
-                        json!({
-                            "status": "error",
-                            "error": "Permission denied",
-                        })
-                        .into(),
+                    return (
+                        "Permission denied".to_string(),
+                        actix_web::http::StatusCode::FORBIDDEN,
                     );
                 }
+
                 let ar = account_manager.inner().read().await;
                 let mut vec = Vec::new();
                 for aid in &descriptor.accounts {
@@ -731,13 +634,13 @@ pub mod manage {
                         .unwrap();
                     let account = a.read().await;
                     vec.push(match account.deref() {
-                        Account::Unverified(_) => ViewAccountResult::Err {
+                        crate::account::Account::Unverified(_) => ViewAccountResult::Err {
                             id: *aid,
                             error: "Target account is not verified".to_string(),
                         },
-                        Account::Verified { attributes, .. } => {
+                        crate::account::Account::Verified { attributes, .. } => {
                             let permissions = account.permissions();
-                            if !context.valid(permissions.clone()).await.unwrap() {
+                            if !cxt.valid(permissions.clone()).await.unwrap() {
                                 ViewAccountResult::Err {
                                     id: account.id(),
                                     error: "Permission denied".to_string(),
@@ -748,57 +651,46 @@ pub mod manage {
                                     metadata: account.metadata().unwrap(),
                                     permissions,
                                     registration_time: attributes.registration_time,
-                                    registration_ip: attributes.registration_ip.clone(),
                                 })
                             }
                         }
                     })
                 }
-                Ok::<tide::Response, tide::Error>(
-                    json!({
-                        "status": "success",
-                        "results": vec,
-                    })
-                    .into(),
+
+                (
+                    serde_json::to_string(&serde_json::json!({ "results": vec })).unwrap(),
+                    actix_web::http::StatusCode::OK,
                 )
             }
-            Err(err) => Ok::<tide::Response, tide::Error>(
-                json!({
-                    "status": "error",
-                    "error": err.to_string(),
-                })
-                .into(),
-            ),
+            Err(err) => (err.to_string(), actix_web::http::StatusCode::UNAUTHORIZED),
         }
     }
 
     /// Modify an account from admin side.
-    pub async fn modify_account(mut req: Request<()>) -> tide::Result {
-        let account_manager = &account::INSTANCE;
-        let context = match RequirePermissionContext::from_header(&req) {
-            Some(e) => e,
-            None => {
-                return Ok::<tide::Response, tide::Error>(
-                    json!({
-                        "status": "error",
-                        "error": "Permission denied",
-                    })
-                    .into(),
-                )
-            }
-        };
-        let descriptor: AccountModifyDescriptor = req.body_json().await?;
-        match context.valid(vec![Permission::ManageAccounts]).await {
+    ///
+    /// Url: `/api/account/manage/modify`
+    ///
+    /// Request header: See [`crate::RequirePermissionContext`].
+    ///
+    /// Request body: See [`ModifyAccountDescriptor`].
+    #[actix_web::post("/api/account/manage/modify")]
+    pub async fn modify_account(
+        cxt: actix_web::web::Header<crate::RequirePermissionContext>,
+        descriptor: actix_web::web::Json<ModifyAccountDescriptor>,
+    ) -> impl actix_web::Responder {
+        let account_manager = &crate::account::INSTANCE;
+        match cxt
+            .valid(vec![sms3rs_shared::account::Permission::ManageAccounts])
+            .await
+        {
             Ok(able) => {
                 if !able {
-                    return Ok::<tide::Response, tide::Error>(
-                        json!({
-                            "status": "error",
-                            "error": "Permission denied",
-                        })
-                        .into(),
+                    return (
+                        "Permission denied".to_string(),
+                        actix_web::http::StatusCode::FORBIDDEN,
                     );
                 }
+
                 let ar = account_manager.inner().read().await;
                 let mut a = ar
                     .get(
@@ -810,12 +702,9 @@ pub mod manage {
                         {
                             Some(e) => *e,
                             None => {
-                                return Ok::<tide::Response, tide::Error>(
-                                    json!({
-                                        "status": "error",
-                                        "error": "Target account not found",
-                                    })
-                                    .into(),
+                                return (
+                                    "Target account not found".to_string(),
+                                    actix_web::http::StatusCode::NOT_FOUND,
                                 )
                             }
                         },
@@ -823,57 +712,45 @@ pub mod manage {
                     .unwrap()
                     .write()
                     .await;
-                if !context.valid(a.permissions()).await.unwrap_or_default() {
-                    return Ok::<tide::Response, tide::Error>(
-                        json!({
-                            "status": "error",
-                            "error": "Permission denied",
-                        })
-                        .into(),
+
+                if !cxt.valid(a.permissions()).await.unwrap_or_default() {
+                    return (
+                        "Permission denied".to_string(),
+                        actix_web::http::StatusCode::FORBIDDEN,
                     );
                 }
-                for variant in descriptor.variants {
-                    match apply_account_modify_variant(variant, a.deref_mut(), &context).await {
+
+                for variant in descriptor.into_inner().variants {
+                    match apply_account_modify_variant(variant, a.deref_mut(), &cxt).await {
                         Ok(_) => continue,
                         Err(err) => {
-                            return Ok::<tide::Response, tide::Error>(
-                                json!({
-                                    "status": "error",
-                                    "error": err.to_string(),
-                                })
-                                .into(),
-                            );
+                            return (err.to_string(), actix_web::http::StatusCode::FORBIDDEN);
                         }
                     }
                 }
+
                 if !a.save().await {
-                    error!("Error when saving account {}", a.email());
+                    tracing::error!("Error when saving account {}", a.email());
                 }
-                Ok::<tide::Response, tide::Error>(
-                    json!({
-                        "status": "success",
-                    })
-                    .into(),
-                )
+
+                (String::new(), actix_web::http::StatusCode::OK)
             }
-            Err(err) => Ok::<tide::Response, tide::Error>(
-                json!({
-                    "status": "error",
-                    "error": err.to_string(),
-                })
-                .into(),
-            ),
+            Err(err) => (err.to_string(), actix_web::http::StatusCode::UNAUTHORIZED),
         }
     }
 
+    /// Apply an [`AccountModifyVariant`] to an account.
+    /// Not a request handling method.
     async fn apply_account_modify_variant(
         mt: AccountModifyVariant,
-        account: &mut Account,
-        context: &RequirePermissionContext,
-    ) -> Result<(), AccountError> {
+        account: &mut crate::account::Account,
+        context: &crate::RequirePermissionContext,
+    ) -> anyhow::Result<()> {
         match account {
-            Account::Unverified(_) => return Err(AccountError::UserUnverifiedError),
-            Account::Verified { attributes, .. } => match mt {
+            crate::account::Account::Unverified(_) => {
+                return Err(anyhow::anyhow!("Account unverified"))
+            }
+            crate::account::Account::Verified { attributes, .. } => match mt {
                 AccountModifyVariant::Name(name) => attributes.name = name,
                 AccountModifyVariant::SchoolId(id) => attributes.school_id = id,
                 AccountModifyVariant::Phone(phone) => attributes.phone = phone,

@@ -83,7 +83,8 @@ async fn new() {
     reset_all().await;
 
     let mut app = tide::new();
-    app.at("/api/post/new").post(crate::post::handle::new_post);
+    app.at("/api/post/new")
+        .post(crate::post::handle::create_post);
 
     let account_id = 123456;
     let password = "password123456";
@@ -128,9 +129,9 @@ async fn new() {
             img: async_std::sync::RwLock::new(None),
         });
 
-    use sms3rs_shared::post::handle::PostDescriptor;
+    use sms3rs_shared::post::handle::CreatePostDescriptor;
 
-    let descriptor = PostDescriptor {
+    let descriptor = CreatePostDescriptor {
         title: "Test post".to_string(),
         description: "Just for testing".to_string(),
         time_range: (

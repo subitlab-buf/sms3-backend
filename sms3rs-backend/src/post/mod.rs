@@ -1,48 +1,25 @@
 pub(crate) mod cache;
 pub mod handle;
 
-use async_std::sync::RwLock;
-use image::ImageError;
-use once_cell::sync::Lazy;
-use std::{error::Error, fmt::Display};
-
 pub use sms3rs_shared::post::*;
 
-pub static INSTANCE: Lazy<PostManager> = Lazy::new(PostManager::new);
-
-#[derive(Debug)]
-pub enum PostError {
-    ImageError(ImageError),
-}
-
-impl Display for PostError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            PostError::ImageError(err) => err.fmt(f),
-        }
-    }
-}
-
-impl Error for PostError {}
+pub static INSTANCE: once_cell::sync::Lazy<Posts> = once_cell::sync::Lazy::new(Posts::new);
 
 #[must_use = "The save result should be handled"]
 pub async fn save_post(_post: &Post) -> bool {
     #[cfg(not(test))]
     {
-        use async_std::fs::File;
-        use async_std::io::WriteExt;
-
-        match File::create(format!("./data/posts/{}.toml", _post.id)).await {
-            Ok(mut file) => file
-                .write_all(
-                    match toml::to_string(_post) {
-                        Ok(s) => s,
-                        Err(_) => return false,
-                    }
-                    .as_bytes(),
-                )
-                .await
-                .is_ok(),
+        match tokio::fs::File::create(format!("./data/posts/{}.toml", _post.id)).await {
+            Ok(mut file) => tokio::io::AsyncWriteExt::write_all(
+                &mut file,
+                match toml::to_string(_post) {
+                    Ok(s) => s,
+                    Err(_) => return false,
+                }
+                .as_bytes(),
+            )
+            .await
+            .is_ok(),
             Err(_) => false,
         }
     }
@@ -55,7 +32,7 @@ pub async fn save_post(_post: &Post) -> bool {
 pub async fn remove_post(_post: &Post) -> bool {
     #[cfg(not(test))]
     {
-        return async_std::fs::remove_file(format!("./data/posts/{}.toml", _post.id))
+        return tokio::fs::remove_file(format!("./data/posts/{}.toml", _post.id))
             .await
             .is_ok();
     }
@@ -64,11 +41,11 @@ pub async fn remove_post(_post: &Post) -> bool {
     true
 }
 
-pub struct PostManager {
-    pub posts: RwLock<Vec<RwLock<Post>>>,
+pub struct Posts {
+    pub posts: tokio::sync::RwLock<Vec<tokio::sync::RwLock<Post>>>,
 }
 
-impl PostManager {
+impl Posts {
     fn new() -> Self {
         #[cfg(not(test))]
         {
@@ -98,21 +75,24 @@ impl PostManager {
                 posts: {
                     let mut v = Vec::new();
                     for e in vec {
-                        v.push(RwLock::new(e));
+                        v.push(tokio::sync::RwLock::new(e));
                     }
-                    RwLock::new(v)
+                    tokio::sync::RwLock::new(v)
                 },
             }
         }
 
         #[cfg(test)]
         Self {
-            posts: RwLock::new(Vec::new()),
+            posts: tokio::sync::RwLock::new(Vec::new()),
         }
     }
 
     pub async fn push(&self, post: Post) {
-        self.posts.write().await.push(RwLock::new(post))
+        self.posts
+            .write()
+            .await
+            .push(tokio::sync::RwLock::new(post))
     }
 
     /// Indicates if the target id is already contained in this instance.

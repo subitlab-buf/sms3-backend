@@ -1,9 +1,3 @@
-use super::AccountError;
-use chrono::{Days, NaiveDateTime, Utc};
-use serde::{Deserialize, Serialize};
-use sha256::digest;
-use tide::log::info;
-
 #[cfg(not(test))]
 use once_cell::sync::Lazy;
 
@@ -14,29 +8,27 @@ pub(super) static SENDER_INSTANCE: Lazy<VerificationSender> = Lazy::new(Verifica
 pub static VERIFICATION_CODE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 /// Represent infos of an unverified object.
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
 pub struct Context {
     /// The email address.
     pub email: lettre::Address,
     /// The pending verification code with 6 digits.
     pub code: u32,
     /// The expire time of this context.
-    pub expire_time: NaiveDateTime,
+    pub expire_time: chrono::NaiveDateTime,
 }
 
 impl Context {
-    pub async fn send_verify(&self) -> Result<(), AccountError> {
-        info!(
+    pub async fn send_verify(&self) -> anyhow::Result<()> {
+        tracing::info!(
             "Sending verification code for {} (code: {})",
-            self.email, self.code
+            self.email,
+            self.code
         );
 
         #[cfg(not(test))]
         {
-            SENDER_INSTANCE
-                .send_verification(self)
-                .await
-                .map_err(|err| AccountError::MailSendError(err.to_string()))?;
+            SENDER_INSTANCE.send_verification(self).await?
         }
 
         #[cfg(test)]
@@ -44,20 +36,20 @@ impl Context {
             VERIFICATION_CODE.store(self.code, std::sync::atomic::Ordering::Relaxed);
         }
 
-        info!("Verification code for {} sent", self.email);
+        tracing::info!("Verification code for {} sent", self.email);
         Ok(())
     }
 
     /// Whether this context was expired.
     pub fn is_expired(&self) -> bool {
-        self.expire_time <= Utc::now().naive_utc()
+        self.expire_time <= chrono::Utc::now().naive_utc()
     }
 }
 
 /// A simple token manager.
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
 pub struct Tokens {
-    inner: Vec<(Option<NaiveDateTime>, String)>,
+    inner: Vec<(Option<chrono::NaiveDateTime>, String)>,
 }
 
 impl Tokens {
@@ -78,14 +70,9 @@ impl Tokens {
         let now = if expire_time == 0 {
             None
         } else {
-            Some(
-                Utc::now()
-                    .naive_utc()
-                    .checked_add_days(Days::new(expire_time as u64))
-                    .unwrap_or_default(),
-            )
+            Some(chrono::Utc::now().naive_utc() + chrono::Days::new(expire_time as u64))
         };
-        let token = digest(format!("{}-{:?}", id, now));
+        let token = sha256::digest(format!("{}-{:?}", id, now));
         if self.inner.capacity() == self.inner.len() + 1 {
             self.inner.remove(self.inner.len());
         }
@@ -108,7 +95,7 @@ impl Tokens {
     /// Remove expired tokens.
     pub fn refresh(&mut self) {
         self.inner
-            .retain(|e| e.0.map_or(true, |a| a > Utc::now().naive_utc()));
+            .retain(|e| e.0.map_or(true, |a| a > chrono::Utc::now().naive_utc()));
         self.inner.sort_by(|a, b| b.0.cmp(&a.0));
     }
 }
@@ -126,15 +113,11 @@ impl VerificationSender {
         }
     }
 
-    fn mailer(&self) -> lettre::AsyncSmtpTransport<lettre::AsyncStd1Executor> {
-        use lettre::{
-            transport::smtp::authentication::Credentials, AsyncSmtpTransport, AsyncStd1Executor,
-        };
-
-        AsyncSmtpTransport::<AsyncStd1Executor>::relay(&self.config.server)
+    fn mailer(&self) -> lettre::AsyncSmtpTransport<lettre::Tokio1Executor> {
+        lettre::AsyncSmtpTransport::<lettre::Tokio1Executor>::relay(&self.config.server)
             .unwrap()
             .port(self.config.port)
-            .credentials(Credentials::new(
+            .credentials(lettre::transport::smtp::authentication::Credentials::new(
                 self.config.username.clone(),
                 self.config.password.clone(),
             ))

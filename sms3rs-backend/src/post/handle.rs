@@ -1,58 +1,42 @@
-use super::Post;
-use super::PostAcceptationStatus;
-use crate::account;
-use crate::account::Account;
-use crate::account::Permission;
-use crate::post::cache::PostImageCache;
-use crate::RequirePermissionContext;
-use chrono::Days;
-use chrono::Utc;
-use std::collections::hash_map::DefaultHasher;
-use std::collections::VecDeque;
-use std::hash::Hash;
-use std::hash::Hasher;
-use std::ops::Deref;
-use std::sync::atomic;
-use tide::log::error;
-use tide::prelude::*;
-use tide::Request;
-use tide::StatusCode;
+use std::{
+    hash::{Hash, Hasher},
+    ops::Deref,
+};
 
 use sms3rs_shared::post::handle::*;
 
 /// Read and store a cache image with cache id returned.
-pub async fn cache_image(mut req: Request<()>) -> tide::Result {
-    let cxt = match RequirePermissionContext::from_header(&req) {
-        Some(e) => e,
-        None => {
-            return Ok::<tide::Response, tide::Error>(
-                json!({
-                    "status": "error",
-                    "error": "Permission denied",
-                })
-                .into(),
-            )
-        }
-    };
-    match cxt.valid(vec![Permission::Post]).await {
+///
+/// Url: `/api/post/upload-image`
+///
+/// Request header: See [`crate::RequirePermissionContext`].
+///
+/// Request body: Image bytes.
+///
+/// Response body: `200` with `{ "hash": _ }`. (json)
+#[actix_web::post("/api/post/upload-image")]
+pub async fn cache_image(
+    cxt: actix_web::web::Header<crate::RequirePermissionContext>,
+    data: actix_web::web::Bytes,
+) -> impl actix_web::Responder {
+    match cxt
+        .valid(vec![sms3rs_shared::account::Permission::Post])
+        .await
+    {
         Ok(able) => {
             if able {
                 let id;
                 super::cache::INSTANCE
                     .push(
-                        match PostImageCache::new(
+                        match crate::post::cache::PostImageCache::new(
                             &{
-                                let bs = req.body_bytes().await?;
-                                if bs.len() > 50_000_000 {
-                                    return Ok::<tide::Response, tide::Error>(
-                                        json!({
-                                            "status": "error",
-                                            "error": format!("Image too big"),
-                                        })
-                                        .into(),
+                                if data.len() > 50_000_000 {
+                                    return (
+                                        String::new(),
+                                        actix_web::http::StatusCode::PAYLOAD_TOO_LARGE,
                                     );
                                 }
-                                bs
+                                data
                             },
                             cxt.account_id,
                         ) {
@@ -61,190 +45,158 @@ pub async fn cache_image(mut req: Request<()>) -> tide::Result {
                                 e.0
                             }
                             Err(err) => {
-                                return Ok::<tide::Response, tide::Error>(
-                                    json!({
-                                        "status": "error",
-                                        "error": format!("Image cache create failed: {}", err),
-                                    })
-                                    .into(),
+                                return (
+                                    err.to_string(),
+                                    actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
                                 )
                             }
                         },
                     )
                     .await;
-                Ok::<tide::Response, tide::Error>(
-                    json!({
-                        "status": "success",
-                        "hash": id,
-                    })
-                    .into(),
+                (
+                    serde_json::to_string(&serde_json::json!({ "hash": id })).unwrap(),
+                    actix_web::http::StatusCode::OK,
                 )
             } else {
-                Ok::<tide::Response, tide::Error>(
-                    json!({
-                        "status": "error",
-                        "error": "Permission denied",
-                    })
-                    .into(),
+                (
+                    "Permission denied".to_string(),
+                    actix_web::http::StatusCode::FORBIDDEN,
                 )
             }
         }
-        Err(err) => Ok::<tide::Response, tide::Error>(
-            json!({
-                "status": "error",
-                "error": err.to_string(),
-            })
-            .into(),
-        ),
+        Err(err) => (err.to_string(), actix_web::http::StatusCode::UNAUTHORIZED),
     }
 }
 
 /// Get image png bytes from target image cache hash.
-pub async fn get_image(mut req: Request<()>) -> tide::Result {
-    let cxt = match RequirePermissionContext::from_header(&req) {
-        Some(e) => e,
-        None => {
-            return Ok::<tide::Response, tide::Error>(
-                json!({
-                    "status": "error",
-                    "error": "Permission denied",
-                })
-                .into(),
-            )
-        }
-    };
-    let descriptor: GetImageDescriptor = req.body_json().await?;
-    match cxt.valid(vec![Permission::View]).await {
+///
+/// Url: `/api/post/get-image/?hash={image_hash}`
+///
+/// Request header: See [`crate::RequirePermissionContext`].
+///
+/// Response body: `200` with image bytes.
+#[actix_web::get("/api/post/get-image")]
+pub async fn get_image(
+    cxt: actix_web::web::Header<crate::RequirePermissionContext>,
+    actix_web::web::Query(ImageHashTarget { hash }): actix_web::web::Query<ImageHashTarget>,
+) -> impl actix_web::Responder {
+    match cxt
+        .valid(vec![sms3rs_shared::account::Permission::View])
+        .await
+    {
         Ok(able) => {
             if able {
                 for img in super::cache::INSTANCE.caches.read().await.iter() {
-                    if img.hash == descriptor.hash {
-                        return Ok::<tide::Response, tide::Error>({
-                            #[allow(unused_mut)]
-                            let mut rep = tide::Response::new(StatusCode::Ok);
+                    if img.hash == hash {
+                        #[cfg(test)]
+                        return (Vec::new(), actix_web::http::StatusCode::NO_CONTENT);
 
-                            #[cfg(not(test))]
+                        #[cfg(not(test))]
+                        {
+                            use tokio::io::AsyncReadExt;
+
+                            match tokio::fs::File::open(format!("./data/images/{}.png", img.hash))
+                                .await
                             {
-                                use async_std::io::BufReader;
-                                use tide::Body;
-                                rep.set_body(Body::from_reader(
-                                    match async_std::fs::File::open(format!(
-                                        "./data/images/{}.png",
-                                        img.hash
-                                    ))
-                                    .await
-                                    {
-                                        Ok(e) => BufReader::new(e),
-                                        Err(_) => {
-                                            return Ok::<tide::Response, tide::Error>(
-                                                tide::Response::new(StatusCode::NoContent),
-                                            )
-                                        }
-                                    },
-                                    None,
-                                ));
+                                Ok(mut file) => {
+                                    let mut vec = Vec::new();
+                                    let _ = file.read_to_end(&mut vec).await;
+                                    return (vec, actix_web::http::StatusCode::OK);
+                                }
+                                Err(_) => {
+                                    return (
+                                        Vec::new(),
+                                        actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
+                                    )
+                                }
                             }
-
-                            rep
-                        });
+                        }
                     }
                 }
-                Ok::<tide::Response, tide::Error>(tide::Response::new(StatusCode::NoContent))
+
+                (Vec::new(), actix_web::http::StatusCode::NOT_FOUND)
             } else {
-                Ok::<tide::Response, tide::Error>(tide::Response::new(StatusCode::NoContent))
+                (Vec::new(), actix_web::http::StatusCode::FORBIDDEN)
             }
         }
-        Err(err) => Ok::<tide::Response, tide::Error>(
-            json!({
-                "status": "error",
-                "error": err.to_string(),
-            })
-            .into(),
-        ),
+        Err(_) => (Vec::new(), actix_web::http::StatusCode::UNAUTHORIZED),
     }
 }
 
-pub async fn new_post(mut req: Request<()>) -> tide::Result {
-    let cxt = match RequirePermissionContext::from_header(&req) {
-        Some(e) => e,
-        None => {
-            return Ok::<tide::Response, tide::Error>(
-                json!({
-                    "status": "error",
-                    "error": "Permission denied",
-                })
-                .into(),
-            )
-        }
-    };
-    let descriptor: PostDescriptor = req.body_json().await?;
-    match cxt.valid(vec![Permission::Post]).await {
+/// Handle and create a new pending post.
+///
+/// Url: `/api/post/create`
+///
+/// Request header: See [`crate::RequirePermissionContext`].
+///
+/// Request body: See [`PostDescriptor`]
+///
+/// Response body: `200` with `{ "post_id": _ }`. (json)
+#[actix_web::post("/api/post/create")]
+pub async fn create_post(
+    cxt: actix_web::web::Header<crate::RequirePermissionContext>,
+    descriptor: actix_web::web::Json<CreatePostDescriptor>,
+) -> impl actix_web::Responder {
+    match cxt
+        .valid(vec![sms3rs_shared::account::Permission::Post])
+        .await
+    {
         Ok(able) => {
             if able {
                 let cache = super::cache::INSTANCE.caches.read().await;
                 for img_id in descriptor.images.iter() {
                     if !cache.iter().any(|e| e.hash == *img_id) {
-                        return Ok::<tide::Response, tide::Error>(
-                            json!({
-                                "status": "error",
-                                "error": format!("Target image cache {} not fount", img_id),
-                            })
-                            .into(),
+                        return (
+                            format!("Image cache with hash {img_id} not found"),
+                            actix_web::http::StatusCode::NOT_FOUND,
                         );
                     }
                 }
+
                 for img_id in descriptor.images.iter() {
                     cache
                         .iter()
                         .find(|e| e.hash == *img_id)
                         .unwrap()
                         .blocked
-                        .store(true, atomic::Ordering::Relaxed)
+                        .store(true, std::sync::atomic::Ordering::Relaxed)
                 }
-                let post = Post {
+
+                let post = sms3rs_shared::post::Post {
                     id: {
-                        let mut hasher = DefaultHasher::new();
+                        let mut hasher = std::collections::hash_map::DefaultHasher::new();
                         descriptor.title.hash(&mut hasher);
                         descriptor.description.hash(&mut hasher);
                         descriptor.images.hash(&mut hasher);
                         let id = hasher.finish();
                         if super::INSTANCE.contains_id(id).await {
-                            return Ok::<tide::Response, tide::Error>(
-                                json!({
-                                    "status": "error",
-                                    "error": "Post id repeated",
-                                })
-                                .into(),
+                            return (
+                                "Post id conflicted".to_string(),
+                                actix_web::http::StatusCode::CONFLICT,
                             );
                         }
                         id
                     },
-                    images: descriptor.images,
+                    images: descriptor.images.iter().copied().collect(),
                     status: {
-                        let mut deque = VecDeque::new();
+                        let mut deque = std::collections::VecDeque::new();
                         deque.push_back(super::PostAcceptationData {
                             operator: cxt.account_id,
                             status: super::PostAcceptationStatus::Pending,
-                            time: Utc::now(),
+                            time: chrono::Utc::now(),
                         });
                         deque
                     },
                     metadata: super::PostMetadata {
-                        title: descriptor.title,
-                        description: descriptor.description,
+                        title: descriptor.title.clone(),
+                        description: descriptor.description.clone(),
                         time_range: {
-                            if descriptor
-                                .time_range
-                                .0
-                                .checked_add_days(Days::new(7))
-                                .map_or(false, |e| e < descriptor.time_range.1)
+                            if descriptor.time_range.0 + chrono::Days::new(7)
+                                < descriptor.time_range.1
                             {
-                                return Ok::<tide::Response, tide::Error>(
-                                    json!({
-                                        "status": "error",
-                                        "error": "Post time out of range",
-                                    })
-                                    .into(),
+                                return (
+                                    "Post time out of range".to_string(),
+                                    actix_web::http::StatusCode::FORBIDDEN,
                                 );
                             }
                             descriptor.time_range
@@ -252,59 +204,53 @@ pub async fn new_post(mut req: Request<()>) -> tide::Result {
                     },
                     publisher: cxt.account_id,
                 };
+
                 if !super::save_post(&post).await {
-                    error!("Error while saving post {}", post.id);
+                    tracing::error!("Error while saving post {}", post.id);
                 }
+
                 let id = post.id;
                 super::INSTANCE.push(post).await;
-                Ok::<tide::Response, tide::Error>(
-                    json!({
-                        "status": "success",
-                        "post_id": id,
-                    })
-                    .into(),
+
+                (
+                    serde_json::to_string(&serde_json::json!({ "post_id": id })).unwrap(),
+                    actix_web::http::StatusCode::OK,
                 )
             } else {
-                Ok::<tide::Response, tide::Error>(
-                    json!({
-                        "status": "error",
-                        "error": "Permission denied",
-                    })
-                    .into(),
+                (
+                    "Permission denied".to_string(),
+                    actix_web::http::StatusCode::FORBIDDEN,
                 )
             }
         }
-        Err(err) => Ok::<tide::Response, tide::Error>(
-            json!({
-                "status": "error",
-                "error": err.to_string(),
-            })
-            .into(),
-        ),
+        Err(err) => (err.to_string(), actix_web::http::StatusCode::UNAUTHORIZED),
     }
 }
 
-pub async fn get_posts(mut req: Request<()>) -> tide::Result {
-    let cxt = match RequirePermissionContext::from_header(&req) {
-        Some(e) => e,
-        None => {
-            return Ok::<tide::Response, tide::Error>(
-                json!({
-                    "status": "error",
-                    "error": "Permission denied",
-                })
-                .into(),
-            )
-        }
-    };
-    let descriptor: GetPostsDescriptor = req.body_json().await?;
-    match cxt.valid(vec![Permission::View]).await {
+/// Get posts based on the given filters.
+///
+/// Url: `/api/post/get`
+///
+/// Request header: See [`crate::RequirePermissionContext`].
+///
+/// Request body: See [`GetPostsDescriptor`].
+///
+/// Response body: `200` with `{ "posts": [_] }`. (json)
+#[actix_web::post("/api/post/get")]
+pub async fn get_posts(
+    cxt: actix_web::web::Header<crate::RequirePermissionContext>,
+    descriptor: actix_web::web::Json<GetPostsDescriptor>,
+) -> impl actix_web::Responder {
+    match cxt
+        .valid(vec![sms3rs_shared::account::Permission::View])
+        .await
+    {
         Ok(able) => {
             if able {
-                let am = account::INSTANCE.inner().read().await;
+                let am = crate::account::INSTANCE.inner().read().await;
                 let ar = am
                     .get(
-                        *account::INSTANCE
+                        *crate::account::INSTANCE
                             .index()
                             .read()
                             .await
@@ -314,7 +260,9 @@ pub async fn get_posts(mut req: Request<()>) -> tide::Result {
                     .unwrap()
                     .read()
                     .await;
+
                 let mut posts = Vec::new();
+
                 for p in super::INSTANCE.posts.read().await.iter() {
                     let pr = p.read().await;
                     if descriptor
@@ -325,36 +273,32 @@ pub async fn get_posts(mut req: Request<()>) -> tide::Result {
                         posts.push(pr.id);
                     }
                 }
-                Ok::<tide::Response, tide::Error>(
-                    json!({
-                        "status": "success",
-                        "posts": posts,
-                    })
-                    .into(),
+
+                (
+                    serde_json::to_string(&serde_json::json!({ "posts": posts })).unwrap(),
+                    actix_web::http::StatusCode::OK,
                 )
             } else {
-                Ok::<tide::Response, tide::Error>(
-                    json!({
-                        "status": "error",
-                        "error": "Permission denied",
-                    })
-                    .into(),
+                (
+                    "Permission denied".to_string(),
+                    actix_web::http::StatusCode::FORBIDDEN,
                 )
             }
         }
-        Err(err) => Ok::<tide::Response, tide::Error>(
-            json!({
-                "status": "error",
-                "error": err.to_string(),
-            })
-            .into(),
-        ),
+        Err(err) => (err.to_string(), actix_web::http::StatusCode::UNAUTHORIZED),
     }
 }
 
-/// If the target post matches this filter and the target account has enough permission to get the post.
-fn matches_get_post_filter(filter: &GetPostsFilter, post: &Post, user: &Account) -> bool {
-    let date = Utc::now().date_naive();
+/// Whether the target post matches this filter and
+/// the target account has enough permission to get the post.
+///
+/// Not a request handling method.
+fn matches_get_post_filter(
+    filter: &GetPostsFilter,
+    post: &sms3rs_shared::post::Post,
+    account: &crate::account::Account,
+) -> bool {
+    let date = chrono::Utc::now().date_naive();
     (match filter {
         GetPostsFilter::Acceptation(status) => post
             .status
@@ -368,26 +312,28 @@ fn matches_get_post_filter(filter: &GetPostsFilter, post: &Post, user: &Account)
             ks.into_iter()
                 .all(|k| post.metadata.title.contains(k) && post.metadata.description.contains(k))
         }
-    }) && (post.publisher == user.id()
-        || (post.metadata.time_range.0 <= date && user.has_permission(Permission::View))
-        || user.has_permission(Permission::Check))
+    }) && (post.publisher == account.id()
+        || (post.metadata.time_range.0 <= date
+            && account.has_permission(sms3rs_shared::account::Permission::View))
+        || account.has_permission(sms3rs_shared::account::Permission::Check))
 }
 
-pub async fn edit_post(mut req: Request<()>) -> tide::Result {
-    let cxt = match RequirePermissionContext::from_header(&req) {
-        Some(e) => e,
-        None => {
-            return Ok::<tide::Response, tide::Error>(
-                json!({
-                    "status": "error",
-                    "error": "Permission denied",
-                })
-                .into(),
-            )
-        }
-    };
-    let descriptor: EditPostDescriptor = req.body_json().await?;
-    match cxt.valid(vec![Permission::Post]).await {
+/// Edit a post.
+///
+/// Url: `/api/post/edit`
+///
+/// Request header: See [`crate::RequirePermissionContext`].
+///
+/// Request body: See [`EditPostDescriptor`].
+#[actix_web::post("/api/post/edit")]
+pub async fn edit_post(
+    cxt: actix_web::web::Header<crate::RequirePermissionContext>,
+    descriptor: actix_web::web::Json<EditPostDescriptor>,
+) -> impl actix_web::Responder {
+    match cxt
+        .valid(vec![sms3rs_shared::account::Permission::Post])
+        .await
+    {
         Ok(able) => {
             if able {
                 for p in super::INSTANCE.posts.read().await.iter() {
@@ -397,28 +343,27 @@ pub async fn edit_post(mut req: Request<()>) -> tide::Result {
                             || pr
                                 .status
                                 .back()
-                                .map(|e| matches!(e.status, PostAcceptationStatus::Submitted(_)))
+                                .map(|e| {
+                                    matches!(
+                                        e.status,
+                                        sms3rs_shared::post::PostAcceptationStatus::Submitted(_)
+                                    )
+                                })
                                 .unwrap_or_default()
                         {
-                            return Ok::<tide::Response, tide::Error>(
-                                json!({
-                                    "status": "error",
-                                    "error": "Permission denied",
-                                })
-                                .into(),
+                            return (
+                                "Permission denied".to_string(),
+                                actix_web::http::StatusCode::FORBIDDEN,
                             );
                         }
                         let id = pr.id;
                         drop(pr);
                         for variant in descriptor.variants.iter() {
                             match apply_edit_post_variant(variant, id, cxt.account_id).await {
-                                Some(err) => {
-                                    return Ok::<tide::Response, tide::Error>(
-                                        json!({
-                                            "status": "error",
-                                            "error": format!("Error occurred with post variant {id}: {err}"),
-                                        })
-                                        .into(),
+                                Err(err) => {
+                                    return (
+                                        format!("Unable to edit post: {err}"),
+                                        actix_web::http::StatusCode::FORBIDDEN,
                                     );
                                 }
                                 _ => (),
@@ -426,49 +371,35 @@ pub async fn edit_post(mut req: Request<()>) -> tide::Result {
                         }
                         let post = p.read().await;
                         if !super::save_post(post.deref()).await {
-                            error!("Error while saving post {}", post.id);
+                            tracing::error!("Error while saving post {}", post.id);
                         }
-                        return Ok::<tide::Response, tide::Error>(
-                            json!({
-                                "status": "success",
-                            })
-                            .into(),
-                        );
+
+                        return (String::new(), actix_web::http::StatusCode::OK);
                     }
                 }
-                Ok::<tide::Response, tide::Error>(
-                    json!({
-                        "status": "error",
-                        "error": "Target post not found",
-                    })
-                    .into(),
+
+                (
+                    "Target post not found".to_string(),
+                    actix_web::http::StatusCode::NOT_FOUND,
                 )
             } else {
-                Ok::<tide::Response, tide::Error>(
-                    json!({
-                        "status": "error",
-                        "error": "Permission denied",
-                    })
-                    .into(),
+                (
+                    "Permission denied".to_string(),
+                    actix_web::http::StatusCode::FORBIDDEN,
                 )
             }
         }
-        Err(err) => Ok::<tide::Response, tide::Error>(
-            json!({
-                "status": "error",
-                "error": err.to_string(),
-            })
-            .into(),
-        ),
+        Err(err) => (err.to_string(), actix_web::http::StatusCode::UNAUTHORIZED),
     }
 }
 
-/// Apply this edition, return an err if error occurs.
+/// Apply this edition and return an err if error occurs.
+/// Not a request handling method.
 pub async fn apply_edit_post_variant(
     variant: &EditPostVariant,
     post_id: u64,
     user_id: u64,
-) -> Option<String> {
+) -> anyhow::Result<()> {
     let posts = super::INSTANCE.posts.read().await;
     let mut post = match {
         let mut e = None;
@@ -481,7 +412,7 @@ pub async fn apply_edit_post_variant(
         e
     } {
         Some(e) => e,
-        None => return Some("Post not found".to_string()),
+        None => return Err(anyhow::anyhow!("Post not found")),
     };
     match variant {
         EditPostVariant::Title(value) => post.metadata.title = value.clone(),
@@ -490,18 +421,18 @@ pub async fn apply_edit_post_variant(
             let cache = super::cache::INSTANCE.caches.read().await;
             for img_id in post.images.iter() {
                 if let Some(e) = cache.iter().find(|e| e.hash == *img_id) {
-                    e.blocked.store(false, atomic::Ordering::Relaxed)
+                    e.blocked.store(false, std::sync::atomic::Ordering::Relaxed)
                 }
             }
             for img_id in imgs.iter() {
                 if !cache.iter().any(|e| e.hash == *img_id) {
-                    return Some(format!("Target image cache {} not fount", img_id));
+                    return Err(anyhow::anyhow!("Target image cache {} not fount", img_id));
                 }
             }
             for img_id in imgs.iter() {
                 let mut unlock = true;
                 for e in super::INSTANCE.posts.read().await.iter() {
-                    if let Some(er) = e.try_read() {
+                    if let Ok(er) = e.try_read() {
                         if er.images.contains(img_id) {
                             unlock = false;
                             break;
@@ -515,36 +446,34 @@ pub async fn apply_edit_post_variant(
                         .find(|e| e.hash == *img_id)
                         .unwrap()
                         .blocked
-                        .store(true, atomic::Ordering::Relaxed)
+                        .store(true, std::sync::atomic::Ordering::Relaxed)
                 }
             }
         }
         EditPostVariant::TimeRange(start, end) => {
-            if start
-                .checked_add_days(Days::new(7))
-                .map_or(false, |e| &e < end)
-            {
-                return Some("Post time out of range".to_string());
+            if *start + chrono::Days::new(7) < *end {
+                return Err(anyhow::anyhow!("Post time out of range"));
             }
             post.metadata.time_range = (*start, *end);
         }
         EditPostVariant::CancelSubmission => {
-            if post
-                .status
-                .back()
-                .map_or(true, |e| matches!(e.status, PostAcceptationStatus::Pending))
-            {
-                return Some("Target post was already pended".to_string());
+            if post.status.back().map_or(true, |e| {
+                matches!(
+                    e.status,
+                    sms3rs_shared::post::PostAcceptationStatus::Pending
+                )
+            }) {
+                return Err(anyhow::anyhow!("Target post was already pended"));
             }
             post.status.push_back(super::PostAcceptationData {
                 operator: user_id,
-                status: PostAcceptationStatus::Pending,
-                time: Utc::now(),
+                status: sms3rs_shared::post::PostAcceptationStatus::Pending,
+                time: chrono::Utc::now(),
             })
         }
         EditPostVariant::Destroy => {
             if !super::remove_post(post.deref()).await {
-                error!("Post {} save failed", post.id);
+                tracing::error!("Post {} save failed", post.id);
             }
             drop(post);
             drop(posts);
@@ -557,7 +486,7 @@ pub async fn apply_edit_post_variant(
                     for img_id in pr.images.iter() {
                         let mut unlock = true;
                         for e in super::INSTANCE.posts.read().await.iter() {
-                            if let Some(er) = e.try_read() {
+                            if let Ok(er) = e.try_read() {
                                 if er.images.contains(img_id) {
                                     unlock = false;
                                     break;
@@ -568,7 +497,8 @@ pub async fn apply_edit_post_variant(
                         if unlock {
                             for im in super::cache::INSTANCE.caches.read().await.iter() {
                                 if &im.hash == img_id {
-                                    im.blocked.store(false, atomic::Ordering::Relaxed);
+                                    im.blocked
+                                        .store(false, std::sync::atomic::Ordering::Relaxed);
                                     break;
                                 }
                             }
@@ -581,46 +511,53 @@ pub async fn apply_edit_post_variant(
                 Some(e) => {
                     posts.remove(e);
                 }
-                None => return Some("Post not found".to_string()),
+                None => return Err(anyhow::anyhow!("Post not found")),
             }
         }
         EditPostVariant::RequestReview(msg) => {
             if post.status.back().map_or(true, |e| {
-                matches!(e.status, PostAcceptationStatus::Submitted(_))
+                matches!(
+                    e.status,
+                    sms3rs_shared::post::PostAcceptationStatus::Submitted(_)
+                )
             }) {
-                return Some("Target post was already submitted".to_string());
+                return Err(anyhow::anyhow!("Target post was already submitted"));
             }
             post.status.push_back(super::PostAcceptationData {
                 operator: user_id,
-                status: PostAcceptationStatus::Submitted(msg.clone()),
-                time: Utc::now(),
+                status: sms3rs_shared::post::PostAcceptationStatus::Submitted(msg.clone()),
+                time: chrono::Utc::now(),
             })
         }
     }
-    None
+    Ok(())
 }
 
-pub async fn get_posts_info(mut req: Request<()>) -> tide::Result {
-    let cxt = match RequirePermissionContext::from_header(&req) {
-        Some(e) => e,
-        None => {
-            return Ok::<tide::Response, tide::Error>(
-                json!({
-                    "status": "error",
-                    "error": "Permission denied",
-                })
-                .into(),
-            )
-        }
-    };
-    let descriptor: GetPostsInfoDescriptor = req.body_json().await?;
-    match cxt.valid(vec![Permission::View]).await {
+/// Get posts info.
+///
+/// Url: `/api/post/get-info`
+///
+/// Request header: See [`crate::RequirePermissionContext`].
+///
+/// Request body: See [`GetPostsInfoDescriptor`].
+///
+/// Response body: `200` with `{ "results": [_] }`,
+/// see [`GetPostInfoResult`]. (json)
+#[actix_web::post("/api/post/get-info")]
+pub async fn get_posts_info(
+    cxt: actix_web::web::Header<crate::RequirePermissionContext>,
+    descriptor: actix_web::web::Json<GetPostsInfoDescriptor>,
+) -> impl actix_web::Responder {
+    match cxt
+        .valid(vec![sms3rs_shared::account::Permission::View])
+        .await
+    {
         Ok(able) => {
             if able {
-                let am = account::INSTANCE.inner().read().await;
+                let am = crate::account::INSTANCE.inner().read().await;
                 let ar = am
                     .get(
-                        *account::INSTANCE
+                        *crate::account::INSTANCE
                             .index()
                             .read()
                             .await
@@ -632,18 +569,18 @@ pub async fn get_posts_info(mut req: Request<()>) -> tide::Result {
                     .await;
                 let mut results = Vec::new();
                 let posts = super::INSTANCE.posts.read().await;
-                let date = Utc::now().date_naive();
+                let date = chrono::Utc::now().date_naive();
                 for p in descriptor.posts.iter() {
                     let mut ps = false;
                     for e in posts.iter() {
                         let er = e.read().await;
                         if er.id == *p {
                             if er.publisher == cxt.account_id
-                                || ar.has_permission(Permission::Check)
+                                || ar.has_permission(sms3rs_shared::account::Permission::Check)
                             {
                                 results.push(GetPostInfoResult::Full(er.clone()))
                             } else if er.metadata.time_range.0 <= date
-                                && ar.has_permission(Permission::View)
+                                && ar.has_permission(sms3rs_shared::account::Permission::View)
                             {
                                 results.push(GetPostInfoResult::Foreign {
                                     id: er.id,
@@ -662,48 +599,38 @@ pub async fn get_posts_info(mut req: Request<()>) -> tide::Result {
                         results.push(GetPostInfoResult::NotFound(*p))
                     }
                 }
-                Ok::<tide::Response, tide::Error>(
-                    json!({
-                        "status": "success",
-                        "results": results,
-                    })
-                    .into(),
+
+                (
+                    serde_json::to_string(&serde_json::json!({ "results": results })).unwrap(),
+                    actix_web::http::StatusCode::OK,
                 )
             } else {
-                Ok::<tide::Response, tide::Error>(
-                    json!({
-                        "status": "error",
-                        "error": "Permission denied",
-                    })
-                    .into(),
+                (
+                    "Permission denied".to_string(),
+                    actix_web::http::StatusCode::FORBIDDEN,
                 )
             }
         }
-        Err(err) => Ok::<tide::Response, tide::Error>(
-            json!({
-                "status": "error",
-                "error": err.to_string(),
-            })
-            .into(),
-        ),
+        Err(err) => (err.to_string(), actix_web::http::StatusCode::UNAUTHORIZED),
     }
 }
 
-pub async fn approve_post(mut req: Request<()>) -> tide::Result {
-    let cxt = match RequirePermissionContext::from_header(&req) {
-        Some(e) => e,
-        None => {
-            return Ok::<tide::Response, tide::Error>(
-                json!({
-                    "status": "error",
-                    "error": "Permission denied",
-                })
-                .into(),
-            )
-        }
-    };
-    let descriptor: ApprovePostDescriptor = req.body_json().await?;
-    match cxt.valid(vec![Permission::Approve]).await {
+/// Accept or reject a post.
+///
+/// Url: `/api/post/approve`
+///
+/// Request header: See [`crate::RequirePermissionContext`].
+///
+/// Request body: See [`ApprovePostDescriptor`].
+#[actix_web::post("/api/post/approve")]
+pub async fn approve_post(
+    cxt: actix_web::web::Header<crate::RequirePermissionContext>,
+    descriptor: actix_web::web::Json<ApprovePostDescriptor>,
+) -> impl actix_web::Responder {
+    match cxt
+        .valid(vec![sms3rs_shared::account::Permission::Approve])
+        .await
+    {
         Ok(able) => {
             if able {
                 let posts = super::INSTANCE.posts.read().await;
@@ -712,93 +639,74 @@ pub async fn approve_post(mut req: Request<()>) -> tide::Result {
                     if pr.id == descriptor.post {
                         drop(pr);
                         let mut pw = p.write().await;
-                        match descriptor.variant {
+                        match descriptor.into_inner().variant {
                             ApprovePostVariant::Accept(msg) => {
                                 if pw.status.back().map_or(false, |e| {
-                                    matches!(e.status, PostAcceptationStatus::Accepted(_))
+                                    matches!(
+                                        e.status,
+                                        sms3rs_shared::post::PostAcceptationStatus::Accepted(_)
+                                    )
                                 }) {
-                                    return Ok::<tide::Response, tide::Error>(
-                                        json!({
-                                            "status": "error",
-                                            "error": "Target post has already been accepted",
-                                        })
-                                        .into(),
+                                    return (
+                                        "Target post has already been accepted".to_string(),
+                                        actix_web::http::StatusCode::FORBIDDEN,
                                     );
                                 }
                                 pw.status.push_back(super::PostAcceptationData {
                                     operator: cxt.account_id,
-                                    status: PostAcceptationStatus::Accepted(
+                                    status: sms3rs_shared::post::PostAcceptationStatus::Accepted(
                                         msg.unwrap_or_default(),
                                     ),
-                                    time: Utc::now(),
+                                    time: chrono::Utc::now(),
                                 });
                             }
                             ApprovePostVariant::Reject(msg) => {
                                 if pw.status.back().map_or(false, |e| {
-                                    matches!(e.status, PostAcceptationStatus::Rejected(_))
+                                    matches!(
+                                        e.status,
+                                        sms3rs_shared::post::PostAcceptationStatus::Rejected(_)
+                                    )
                                 }) {
-                                    return Ok::<tide::Response, tide::Error>(
-                                        json!({
-                                            "status": "error",
-                                            "error": "Target post has already been rejected",
-                                        })
-                                        .into(),
+                                    return (
+                                        "Target post has already been rejected".to_string(),
+                                        actix_web::http::StatusCode::FORBIDDEN,
                                     );
                                 }
                                 pw.status.push_back(super::PostAcceptationData {
                                     operator: cxt.account_id,
-                                    status: PostAcceptationStatus::Rejected({
+                                    status: sms3rs_shared::post::PostAcceptationStatus::Rejected({
                                         if msg.is_empty() {
-                                            return Ok::<tide::Response, tide::Error>(
-                                                json!({
-                                                    "status": "error",
-                                                    "error": "Message couldn't be empty",
-                                                })
-                                                .into(),
+                                            return (
+                                                "Message couldn't be empty".to_string(),
+                                                actix_web::http::StatusCode::FORBIDDEN,
                                             );
                                         }
                                         msg
                                     }),
-                                    time: Utc::now(),
+                                    time: chrono::Utc::now(),
                                 });
                             }
                         };
 
                         if !super::save_post(pw.deref()).await {
-                            error!("Error while saving post {}", pw.id);
+                            tracing::error!("Error while saving post {}", pw.id);
                         }
 
-                        return Ok::<tide::Response, tide::Error>(
-                            json!({
-                                "status": "success",
-                            })
-                            .into(),
-                        );
+                        return (String::new(), actix_web::http::StatusCode::OK);
                     }
                 }
-                Ok::<tide::Response, tide::Error>(
-                    json!({
-                        "status": "error",
-                        "error": "Target post not found",
-                    })
-                    .into(),
+
+                (
+                    "Target post not found".to_string(),
+                    actix_web::http::StatusCode::NOT_FOUND,
                 )
             } else {
-                Ok::<tide::Response, tide::Error>(
-                    json!({
-                        "status": "error",
-                        "error": "Permission denied",
-                    })
-                    .into(),
+                (
+                    "Permission denied".to_string(),
+                    actix_web::http::StatusCode::FORBIDDEN,
                 )
             }
         }
-        Err(err) => Ok::<tide::Response, tide::Error>(
-            json!({
-                "status": "error",
-                "error": err.to_string(),
-            })
-            .into(),
-        ),
+        Err(err) => (err.to_string(), actix_web::http::StatusCode::UNAUTHORIZED),
     }
 }

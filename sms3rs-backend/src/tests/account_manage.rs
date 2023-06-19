@@ -348,12 +348,12 @@ async fn modify() {
         .await;
 
     use sms3rs_shared::account::{
-        handle::manage::{AccountModifyDescriptor, AccountModifyVariant},
+        handle::manage::{AccountModifyVariant, ModifyAccountDescriptor},
         Permission,
     };
 
     {
-        let descriptor = AccountModifyDescriptor {
+        let descriptor = ModifyAccountDescriptor {
             account_id: test_account_id_0,
             variants: vec![AccountModifyVariant::Name("Tianyang He".to_string())],
         };
@@ -381,7 +381,7 @@ async fn modify() {
     }
 
     {
-        let descriptor = AccountModifyDescriptor {
+        let descriptor = ModifyAccountDescriptor {
             account_id: test_account_id_1,
             variants: vec![
                 AccountModifyVariant::Email(

@@ -1,10 +1,11 @@
 use std::ops::Deref;
 
 mod account;
-pub(crate) mod config;
+mod config;
 mod post;
 
-/// The module for unit testing, will only be availabled in dev env.
+/// The module for unit testing which
+/// only available in dev env.
 #[cfg(test)]
 mod tests;
 
@@ -14,49 +15,39 @@ async fn main() -> std::io::Result<()> {
 
     actix_web::HttpServer::new(|| {
         actix_web::App::new()
+            // basic account controlling
             .service(account::handle::create_account)
             .service(account::handle::verify_account)
             .service(account::handle::login_account)
+            .service(account::handle::sign_out_account)
+            .service(account::handle::view_account)
+            .service(account::handle::edit_account)
+            .service(account::handle::reset_password)
+            // account management
+            .service(account::handle::manage::make_account)
+            .service(account::handle::manage::view_account)
+            .service(account::handle::manage::modify_account)
+            // posting
+            .service(post::handle::cache_image)
+            .service(post::handle::get_image)
+            .service(post::handle::create_post)
+            .service(post::handle::get_posts)
+            .service(post::handle::edit_post)
+            .service(post::handle::get_posts_info)
+            .service(post::handle::approve_post)
     })
     .bind(("127.0.0.1", 8080))?
     .run()
-    .await;
-
-    // Basic account controlling
-    app.at("/api/account/logout")
-        .post(account::handle::logout_account);
-    app.at("/api/account/signout")
-        .post(account::handle::sign_out_account);
-    app.at("/api/account/view")
-        .get(account::handle::view_account);
-    app.at("/api/account/edit")
-        .post(account::handle::edit_account);
-    app.at("/api/account/reset-password")
-        .post(account::handle::reset_password);
-
-    // Account managing
-    app.at("/api/account/manage/create")
-        .post(account::handle::manage::make_account);
-    app.at("/api/account/manage/view")
-        .post(account::handle::manage::view_account);
-    app.at("/api/account/manage/modify")
-        .post(account::handle::manage::modify_account);
-
-    // Posting
-    app.at("/api/post/upload-image")
-        .post(post::handle::cache_image);
-    app.at("/api/post/get-image").post(post::handle::get_image);
-    app.at("/api/post/create").post(post::handle::new_post);
-    app.at("/api/post/get").post(post::handle::get_posts);
-    app.at("/api/post/edit").post(post::handle::edit_post);
-    app.at("/api/post/get-info")
-        .post(post::handle::get_posts_info);
-    app.at("/api/post/approve").post(post::handle::approve_post);
-
-    Ok(())
+    .await
 }
 
-/// A context for checking the validation of action an account performs with permission requirements.
+/// Context for checking the validation of action an
+/// account performs with permission requirements.
+///
+/// # Use as a header
+///
+/// Header name: See [`Self::HEADER_NAME`].
+/// Header value: `{account_id$token}`.
 pub struct RequirePermissionContext {
     /// The only id of this account.
     pub account_id: u64,
@@ -65,10 +56,11 @@ pub struct RequirePermissionContext {
 }
 
 impl RequirePermissionContext {
+    /// Header name of this context should in.
     const HEADER_NAME: &str = "Auth";
 
-    /// Indicates whether this context's token and permissions is valid.
-    /// The permissions field can be empty.
+    /// Whether this context's token and permissions is valid.
+    /// The permissions field can be empty when no permission is required.
     pub async fn valid(
         &self,
         permissions: sms3rs_shared::account::Permissions,

@@ -1,26 +1,18 @@
 pub mod handle;
 pub mod verify;
 
-use async_std::sync::RwLock;
-use chrono::{DateTime, Duration, Utc};
-use once_cell::sync::Lazy;
-use rand::Rng;
-use serde::{Deserialize, Serialize};
-use sha256::digest;
 use std::{
-    collections::{hash_map::DefaultHasher, HashMap},
-    fmt::Display,
     hash::{Hash, Hasher},
     ops::{Deref, DerefMut},
 };
-use tide::log::error;
 
+use rand::Rng;
 pub use sms3rs_shared::account::*;
 
 /// The static instance of accounts.
-pub static INSTANCE: Lazy<AccountManager> = Lazy::new(AccountManager::new);
+pub static INSTANCE: once_cell::sync::Lazy<Accounts> = once_cell::sync::Lazy::new(Accounts::new);
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub enum AccountError {
     /// Verification code not match.
     VerificationCodeError,
@@ -42,7 +34,7 @@ pub enum AccountError {
     PermissionDeniedError,
 }
 
-impl Display for AccountError {
+impl std::fmt::Display for AccountError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             AccountError::VerificationCodeError => f.write_str("Verification code not match"),
@@ -66,7 +58,7 @@ impl Display for AccountError {
 impl std::error::Error for AccountError {}
 
 /// Represent an account, including unverified and verified.
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
 pub enum Account {
     /// An unverified account.
     Unverified(verify::Context),
@@ -86,9 +78,9 @@ pub enum Account {
 
 impl Account {
     /// Create a new unverified account.
-    pub async fn new(email: lettre::Address) -> Result<Self, AccountError> {
+    pub async fn new(email: lettre::Address) -> anyhow::Result<Self> {
         if email.domain() != "i.pkuschool.edu.cn" && email.domain() != "pkuschool.edu.cn" {
-            return Err(AccountError::EmailDomainNotInSchoolError);
+            return Err(anyhow::anyhow!("Email address not in PKUSchool!"));
         }
         Ok(Self::Unverified({
             let cxt = verify::Context {
@@ -97,16 +89,10 @@ impl Account {
                     let mut rng = rand::thread_rng();
                     rng.gen_range(100000..999999)
                 },
-                expire_time: match Utc::now()
-                    .naive_utc()
-                    .checked_add_signed(Duration::minutes(15))
-                {
-                    Some(e) => e,
-                    _ => return Err(AccountError::DateOutOfRangeError),
-                },
+                expire_time: chrono::Utc::now().naive_utc() + chrono::Duration::minutes(15),
             };
             cxt.send_verify().await.map_err(|err| {
-                error!("Error while sending verification email: {}", err);
+                tracing::error!("Error while sending verification email: {}", err);
                 err
             })?;
             cxt
@@ -127,7 +113,7 @@ impl Account {
                     }
                     *self = Self::Verified {
                         id: {
-                            let mut hasher = DefaultHasher::new();
+                            let mut hasher = std::collections::hash_map::DefaultHasher::new();
                             attributes.email.hash(&mut hasher);
                             hasher.finish()
                         },
@@ -151,7 +137,7 @@ impl Account {
                             if cxt.code != verify_code {
                                 return Err(AccountError::VerificationCodeError);
                             }
-                            attributes.password_sha = digest(password);
+                            attributes.password_sha = sha256::digest(password);
                             *verify = UserVerifyVariant::None;
                             Ok(())
                         }
@@ -167,7 +153,7 @@ impl Account {
     pub fn id(&self) -> u64 {
         match self {
             Account::Unverified(cxt) => {
-                let mut hasher = DefaultHasher::new();
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
                 cxt.email.hash(&mut hasher);
                 hasher.finish()
             }
@@ -222,7 +208,7 @@ impl Account {
                 tokens,
                 ..
             } => {
-                if digest(password) == attributes.password_sha {
+                if sha256::digest(password) == attributes.password_sha {
                     Ok(tokens.new_token(*id, attributes.token_expiration_time))
                 } else {
                     Err(AccountError::PasswordIncorrectError)
@@ -249,11 +235,11 @@ impl Account {
     #[cfg(not(test))]
     #[must_use = "The save result should be handled"]
     pub async fn save(&self) -> bool {
-        use async_std::fs::File;
-        use async_std::io::WriteExt;
-
-        if let Ok(mut file) = File::create(format!("./data/accounts/{}.toml", self.id())).await {
-            file.write_all(
+        if let Ok(mut file) =
+            tokio::fs::File::create(format!("./data/accounts/{}.toml", self.id())).await
+        {
+            tokio::io::AsyncWriteExt::write_all(
+                &mut file,
                 match toml::to_string(&self) {
                     Ok(e) => e,
                     _ => return false,
@@ -277,7 +263,7 @@ impl Account {
     /// Remove this account from filesystem and return whether this account was removed successfully.
     #[cfg(not(test))]
     pub async fn remove(&self) -> bool {
-        async_std::fs::remove_file(format!("./data/accounts/{}.json", self.id()))
+        tokio::fs::remove_file(format!("./data/accounts/{}.json", self.id()))
             .await
             .is_ok()
     }
@@ -296,14 +282,14 @@ enum AccountVerifyVariant {
     ResetPassword(String),
 }
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(serde::Deserialize, serde::Serialize, Debug)]
 pub enum UserVerifyVariant {
     None,
     ForgetPassword(verify::Context),
 }
 
 // Attributes of a registered user.
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
 pub struct UserAttributes {
     /// Email address of this user.
     pub email: lettre::Address,
@@ -320,7 +306,7 @@ pub struct UserAttributes {
     /// Permissions this user has.
     pub permissions: Permissions,
     /// The registration time of this user.
-    pub registration_time: DateTime<Utc>,
+    pub registration_time: chrono::DateTime<chrono::Utc>,
     /// Hash of this user's password.
     pub password_sha: String,
     /// The expiration time of a token in days.
@@ -328,40 +314,14 @@ pub struct UserAttributes {
     pub token_expiration_time: u16,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub enum AccountManagerError {
-    Account(u64, AccountError),
-    AccountNotFound(u64),
-}
-
-impl Display for AccountManagerError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            AccountManagerError::Account(id, e) => {
-                f.write_str("Account ")?;
-                id.fmt(f)?;
-                f.write_str(" Errored: ")?;
-                e.fmt(f)
-            }
-            AccountManagerError::AccountNotFound(id) => {
-                f.write_str("Account ")?;
-                id.fmt(f)?;
-                f.write_str(" not found")
-            }
-        }
-    }
-}
-
-impl std::error::Error for AccountManagerError {}
-
 /// A simple account manager.
-pub struct AccountManager {
-    accounts: RwLock<Vec<RwLock<Account>>>,
+pub struct Accounts {
+    accounts: tokio::sync::RwLock<Vec<tokio::sync::RwLock<Account>>>,
     /// An index cache for getting index from an id.
-    index: RwLock<HashMap<u64, usize>>,
+    index: tokio::sync::RwLock<std::collections::HashMap<u64, usize>>,
 }
 
-impl AccountManager {
+impl Accounts {
     /// Read and create an account manager from `./data/accounts`.
     pub fn new() -> Self {
         #[cfg(not(test))]
@@ -370,7 +330,7 @@ impl AccountManager {
             use std::io::Read;
 
             let mut vec = Vec::new();
-            let mut index = HashMap::new();
+            let mut index = std::collections::HashMap::new();
             let mut i = 0;
             for dir in fs::read_dir("./data/accounts").unwrap() {
                 if let Ok(e) = dir.map(|e| {
@@ -385,38 +345,38 @@ impl AccountManager {
                     .unwrap()
                 }) {
                     index.insert(e.id(), i);
-                    vec.push(RwLock::new(e));
+                    vec.push(tokio::sync::RwLock::new(e));
                     i += 1;
                 } else {
                     continue;
                 }
             }
             Self {
-                accounts: RwLock::new(vec),
-                index: RwLock::new(index),
+                accounts: tokio::sync::RwLock::new(vec),
+                index: tokio::sync::RwLock::new(index),
             }
         }
 
         #[cfg(test)]
         Self {
-            accounts: RwLock::new(Vec::new()),
-            index: RwLock::new(HashMap::new()),
+            accounts: tokio::sync::RwLock::new(Vec::new()),
+            index: tokio::sync::RwLock::new(std::collections::HashMap::new()),
         }
     }
 
     /// Get inner accounts.
-    pub fn inner(&self) -> &RwLock<Vec<RwLock<Account>>> {
+    pub fn inner(&self) -> &tokio::sync::RwLock<Vec<tokio::sync::RwLock<Account>>> {
         &self.accounts
     }
 
     /// Get inner indexe cache.
-    pub fn index(&self) -> &RwLock<HashMap<u64, usize>> {
+    pub fn index(&self) -> &tokio::sync::RwLock<std::collections::HashMap<u64, usize>> {
         &self.index
     }
 
     /// Update index cache of this instance.
     pub async fn update_index(&self) {
-        let mut map = HashMap::new();
+        let mut map = std::collections::HashMap::new();
         for account in self.accounts.read().await.iter().enumerate() {
             map.insert(account.1.read().await.id(), account.0);
         }
@@ -520,12 +480,15 @@ impl AccountManager {
             .await
             .insert(account.id(), self.accounts.read().await.len())
             .is_none());
-        self.accounts.write().await.push(RwLock::new(account));
+        self.accounts
+            .write()
+            .await
+            .push(tokio::sync::RwLock::new(account));
     }
 
     #[cfg(test)]
     pub async fn reset(&self) {
         *self.accounts.write().await.deref_mut() = Vec::new();
-        *self.index.write().await.deref_mut() = HashMap::new();
+        *self.index.write().await.deref_mut() = std::collections::HashMap::new();
     }
 }

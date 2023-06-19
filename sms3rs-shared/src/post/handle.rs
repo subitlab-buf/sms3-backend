@@ -1,12 +1,12 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
-pub struct GetImageDescriptor {
+pub struct ImageHashTarget {
     pub hash: u64,
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct PostDescriptor {
+pub struct CreatePostDescriptor {
     pub title: String,
     pub description: String,
     pub time_range: (chrono::NaiveDate, chrono::NaiveDate),
