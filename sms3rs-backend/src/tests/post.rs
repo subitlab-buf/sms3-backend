@@ -2,12 +2,11 @@ use super::*;
 
 use serial_test::serial;
 use sha256::digest;
-use tide_testing::TideTestingExt;
 
 const TEST_POST_IMG: &[u8; 108416] = include_bytes!("../../../test-resources/test_post.png");
 
 #[serial]
-#[async_std::test]
+#[actix_web::test]
 async fn cache_image() {
     reset_all().await;
 
@@ -32,7 +31,6 @@ async fn cache_image() {
                 organization: None,
                 permissions: vec![crate::account::Permission::Post],
                 registration_time: chrono::Utc::now(),
-                registration_ip: Some("127.0.0.1".to_string()),
                 password_sha: digest(password.to_string()),
                 token_expiration_time: 0,
             },

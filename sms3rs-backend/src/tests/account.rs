@@ -3,46 +3,32 @@ use super::*;
 use serial_test::serial;
 use sha256::digest;
 use std::ops::Deref;
-use tide_testing::TideTestingExt;
 
 /// Test: create an account and verify it.
 #[serial]
-#[async_std::test]
+#[actix_web::test]
 async fn registry() {
     reset_all().await;
 
-    let mut app = tide::new();
-    app.at("/api/account/create")
-        .post(crate::account::handle::create_account);
-    app.at("/api/account/verify")
-        .post(crate::account::handle::verify_account);
+    let app = actix_web::test::init_service(
+        actix_web::App::new()
+            .service(crate::account::handle::create_account)
+            .service(crate::account::handle::verify_account),
+    )
+    .await;
 
-    {
-        use sms3rs_shared::account::handle::AccountCreateDescriptor;
-
-        let descriptor = AccountCreateDescriptor {
-            email: lettre::Address::new("yujiening2025", "i.pkuschool.edu.cn").unwrap(),
-        };
-
-        let response_json: serde_json::Value = app
-            .post("/api/account/create")
-            .body_json(&descriptor)
-            .unwrap()
-            .recv_json()
-            .await
-            .unwrap();
-
-        assert_eq!(
-            response_json
-                .as_object()
-                .unwrap()
-                .get("status")
-                .unwrap()
-                .as_str()
-                .unwrap(),
-            "success"
-        );
-    }
+    assert_eq!(
+        actix_web::test::call_service(
+            &app,
+            actix_web::test::TestRequest::post()
+                .uri("/api/account/create")
+                .param("email", "yujiening2025@i.pkuschool.edu.cn")
+                .to_request(),
+        )
+        .await
+        .status(),
+        actix_web::http::StatusCode::OK
+    );
 
     // Wrong verification code
     {
@@ -54,7 +40,6 @@ async fn registry() {
         let descriptor = AccountVerifyDescriptor {
             code: verification_code,
             variant: sms3rs_shared::account::handle::AccountVerifyVariant::Activate {
-                email: lettre::Address::new("yujiening2025", "i.pkuschool.edu.cn").unwrap(),
                 name: "Jiening Yu".to_string(),
                 id: 2522320,
                 phone: 16601550826,
@@ -64,24 +49,19 @@ async fn registry() {
             },
         };
 
-        let response_json: serde_json::Value = app
-            .post("/api/account/verify")
-            .body_json(&descriptor)
-            .unwrap()
-            .recv_json()
-            .await
-            .unwrap();
-
         assert_ne!(
-            response_json
-                .as_object()
-                .unwrap()
-                .get("status")
-                .unwrap()
-                .as_str()
-                .unwrap(),
-            "success"
-        )
+            actix_web::test::call_service(
+                &app,
+                actix_web::test::TestRequest::post()
+                    .uri("/api/account/verify")
+                    .param("email", "yujiening2025@i.pkuschool.edu.cn")
+                    .set_json(descriptor)
+                    .to_request(),
+            )
+            .await
+            .status(),
+            actix_web::http::StatusCode::OK
+        );
     }
 
     {
@@ -92,7 +72,6 @@ async fn registry() {
         let descriptor = AccountVerifyDescriptor {
             code: verification_code,
             variant: sms3rs_shared::account::handle::AccountVerifyVariant::Activate {
-                email: lettre::Address::new("yujiening2025", "i.pkuschool.edu.cn").unwrap(),
                 name: "Jiening Yu".to_string(),
                 id: 2522320,
                 phone: 16601550826,
@@ -102,36 +81,32 @@ async fn registry() {
             },
         };
 
-        let response_json: serde_json::Value = app
-            .post("/api/account/verify")
-            .body_json(&descriptor)
-            .unwrap()
-            .recv_json()
-            .await
-            .unwrap();
-
         assert_eq!(
-            response_json
-                .as_object()
-                .unwrap()
-                .get("status")
-                .unwrap()
-                .as_str()
-                .unwrap(),
-            "success"
-        )
+            actix_web::test::call_service(
+                &app,
+                actix_web::test::TestRequest::post()
+                    .uri("/api/account/verify")
+                    .param("email", "yujiening2025@i.pkuschool.edu.cn")
+                    .set_json(descriptor)
+                    .to_request(),
+            )
+            .await
+            .status(),
+            actix_web::http::StatusCode::OK
+        );
     }
 }
 
 /// Test for logging in an account.
 #[serial]
-#[async_std::test]
+#[actix_web::test]
 async fn login() {
     reset_all().await;
 
-    let mut app = tide::new();
-    app.at("/api/account/login")
-        .post(crate::account::handle::login_account);
+    let app = actix_web::test::init_service(
+        actix_web::App::new().service(crate::account::handle::login_account),
+    )
+    .await;
 
     let account_id = 123456;
     let password = "password123456";
@@ -148,7 +123,6 @@ async fn login() {
                 organization: None,
                 permissions: vec![],
                 registration_time: chrono::Utc::now(),
-                registration_ip: Some("127.0.0.1".to_string()),
                 password_sha: digest(password.to_string()),
                 token_expiration_time: 0,
             },
@@ -162,31 +136,25 @@ async fn login() {
     use sms3rs_shared::account::handle::AccountLoginDescriptor;
 
     let descriptor = AccountLoginDescriptor {
-        email: lettre::Address::new("yujiening2025", "i.pkuschool.edu.cn").unwrap(),
         password: password.to_string(),
     };
 
-    let response_json: serde_json::Value = app
-        .post("/api/account/login")
-        .body_json(&descriptor)
-        .unwrap()
-        .recv_json()
-        .await
-        .unwrap();
+    let response = actix_web::test::call_service(
+        &app,
+        actix_web::test::TestRequest::post()
+            .uri("/api/account/login")
+            .param("email", "yujiening2025@i.pkuschool.edu.cn")
+            .set_json(descriptor)
+            .to_request(),
+    )
+    .await;
 
-    assert!(
-        response_json
-            .as_object()
-            .unwrap()
-            .get("status")
-            .unwrap()
-            .as_str()
-            .unwrap()
-            == "success"
-    );
+    assert_eq!(response.status(), actix_web::http::StatusCode::OK);
+
+    let body_json = actix_web::test::read_body_json::<serde_json::Value, _>(response).await;
 
     assert_eq!(
-        response_json
+        body_json
             .as_object()
             .unwrap()
             .get("account_id")
@@ -196,7 +164,7 @@ async fn login() {
         account_id
     );
 
-    token = response_json
+    token = body_json
         .as_object()
         .unwrap()
         .get("token")
@@ -207,7 +175,7 @@ async fn login() {
 
     let cxt = crate::RequirePermissionContext {
         token: token.to_string(),
-        account_id: account_id,
+        account_id,
     };
 
     assert!(cxt.valid(vec![]).await.unwrap());
@@ -215,7 +183,7 @@ async fn login() {
 
 /// Test for usage of `RequirePermissionContext`.
 #[serial]
-#[async_std::test]
+#[actix_web::test]
 async fn require_permission_context() {
     reset_all().await;
 
@@ -237,7 +205,6 @@ async fn require_permission_context() {
                     organization: None,
                     permissions: vec![],
                     registration_time: chrono::Utc::now(),
-                    registration_ip: Some("127.0.0.1".to_string()),
                     password_sha: digest(password.to_string()),
                     token_expiration_time: 0,
                 },
@@ -252,7 +219,7 @@ async fn require_permission_context() {
 
         let cxt = crate::RequirePermissionContext {
             token: token.to_string(),
-            account_id: account_id,
+            account_id,
         };
 
         assert!(cxt.valid(vec![]).await.unwrap());
@@ -263,7 +230,7 @@ async fn require_permission_context() {
 
         let cxt_wrong = crate::RequirePermissionContext {
             token: "wrongtoken".to_string(),
-            account_id: account_id,
+            account_id,
         };
 
         assert!(!cxt_wrong.valid(vec![]).await.unwrap());
@@ -282,7 +249,7 @@ async fn require_permission_context() {
 
         let cxt = crate::RequirePermissionContext {
             token: 6.to_string(),
-            account_id: account_id,
+            account_id,
         };
 
         assert!(!cxt.valid(vec![]).await.unwrap_or(true));
@@ -291,13 +258,14 @@ async fn require_permission_context() {
 
 /// Test for logging out an account.
 #[serial]
-#[async_std::test]
+#[actix_web::test]
 async fn logout() {
     reset_all().await;
 
-    let mut app = tide::new();
-    app.at("/api/account/logout")
-        .post(crate::account::handle::logout_account);
+    let app = actix_web::test::init_service(
+        actix_web::App::new().service(crate::account::handle::logout_account),
+    )
+    .await;
 
     let account_id = 123456;
     let password = "password123456";
@@ -316,7 +284,6 @@ async fn logout() {
                 organization: None,
                 permissions: vec![],
                 registration_time: chrono::Utc::now(),
-                registration_ip: Some("127.0.0.1".to_string()),
                 password_sha: digest(password.to_string()),
                 token_expiration_time: 0,
             },
@@ -329,39 +296,38 @@ async fn logout() {
         })
         .await;
 
-    let response_json: serde_json::Value = app
-        .post("/api/account/logout")
-        .header("Token", token.to_string())
-        .header("AccountId", account_id.to_string())
-        .recv_json()
-        .await
-        .unwrap();
-
     assert_eq!(
-        response_json
-            .as_object()
-            .unwrap()
-            .get("status")
-            .unwrap()
-            .as_str()
-            .unwrap(),
-        "success"
+        actix_web::test::call_service(
+            &app,
+            actix_web::test::TestRequest::post()
+                .uri("/api/account/logout")
+                .insert_header(crate::RequirePermissionContext {
+                    account_id,
+                    token: token.to_string()
+                })
+                .to_request(),
+        )
+        .await
+        .status(),
+        actix_web::http::StatusCode::OK
     );
 
     let cxt = crate::RequirePermissionContext {
         token: token.to_string(),
-        account_id: account_id,
+        account_id,
     };
     assert!(!cxt.valid(vec![]).await.unwrap());
 }
 
 #[serial]
-#[async_std::test]
+#[actix_web::test]
 async fn signout() {
     reset_all().await;
-    let mut app = tide::new();
-    app.at("/api/account/signout")
-        .post(crate::account::handle::sign_out_account);
+
+    let app = actix_web::test::init_service(
+        actix_web::App::new().service(crate::account::handle::sign_out_account),
+    )
+    .await;
 
     let account_id = 123456;
     let password = "password123456";
@@ -380,7 +346,6 @@ async fn signout() {
                 organization: None,
                 permissions: vec![],
                 registration_time: chrono::Utc::now(),
-                registration_ip: Some("127.0.0.1".to_string()),
                 password_sha: digest(password.to_string()),
                 token_expiration_time: 0,
             },
@@ -395,71 +360,57 @@ async fn signout() {
 
     use sms3rs_shared::account::handle::AccountSignOutDescriptor;
 
-    {
-        let descriptor_wrong = AccountSignOutDescriptor {
-            password: "fakepassword".to_string(),
-        };
+    assert_ne!(
+        actix_web::test::call_service(
+            &app,
+            actix_web::test::TestRequest::post()
+                .uri("/api/account/signout")
+                .insert_header(crate::RequirePermissionContext {
+                    account_id,
+                    token: token.to_string()
+                })
+                .set_json(AccountSignOutDescriptor {
+                    password: "fakepassword".to_string(),
+                })
+                .to_request(),
+        )
+        .await
+        .status(),
+        actix_web::http::StatusCode::OK
+    );
 
-        let response_json: serde_json::Value = app
-            .post("/api/account/signout")
-            .header("Token", token.to_string())
-            .header("AccountId", account_id.to_string())
-            .body_json(&descriptor_wrong)
-            .unwrap()
-            .recv_json()
-            .await
-            .unwrap();
-
-        assert_ne!(
-            response_json
-                .as_object()
-                .unwrap()
-                .get("status")
-                .unwrap()
-                .as_str()
-                .unwrap(),
-            "success"
-        );
-    }
-
-    {
-        let descriptor = AccountSignOutDescriptor {
-            password: password.to_string(),
-        };
-
-        let response_json: serde_json::Value = app
-            .post("/api/account/signout")
-            .header("Token", token.to_string())
-            .header("AccountId", account_id.to_string())
-            .body_json(&descriptor)
-            .unwrap()
-            .recv_json()
-            .await
-            .unwrap();
-
-        assert_eq!(
-            response_json
-                .as_object()
-                .unwrap()
-                .get("status")
-                .unwrap()
-                .as_str()
-                .unwrap(),
-            "success"
-        );
-    }
+    assert_eq!(
+        actix_web::test::call_service(
+            &app,
+            actix_web::test::TestRequest::post()
+                .uri("/api/account/signout")
+                .insert_header(crate::RequirePermissionContext {
+                    account_id,
+                    token: token.to_string()
+                })
+                .set_json(AccountSignOutDescriptor {
+                    password: password.to_string()
+                })
+                .to_request(),
+        )
+        .await
+        .status(),
+        actix_web::http::StatusCode::OK
+    );
 
     assert!(crate::account::INSTANCE.inner().read().await.is_empty());
     assert!(crate::account::INSTANCE.index().read().await.is_empty());
 }
 
 #[serial]
-#[async_std::test]
+#[actix_web::test]
 async fn view() {
     reset_all().await;
-    let mut app = tide::new();
-    app.at("/api/account/view")
-        .post(crate::account::handle::view_account);
+
+    let app = actix_web::test::init_service(
+        actix_web::App::new().service(crate::account::handle::view_account),
+    )
+    .await;
 
     let account_id = 123456;
     let password = "password123456";
@@ -478,7 +429,6 @@ async fn view() {
                 organization: None,
                 permissions: vec![],
                 registration_time: chrono::Utc::now(),
-                registration_ip: Some("127.0.0.1".to_string()),
                 password_sha: digest(password.to_string()),
                 token_expiration_time: 0,
             },
@@ -493,27 +443,23 @@ async fn view() {
 
     use sms3rs_shared::account::handle::ViewAccountResult;
 
-    let response_json: serde_json::Value = app
-        .post("/api/account/view")
-        .header("Token", token.to_string())
-        .header("AccountId", account_id.to_string())
-        .recv_json()
-        .await
-        .unwrap();
+    let response = actix_web::test::call_service(
+        &app,
+        actix_web::test::TestRequest::post()
+            .uri("/api/account/view")
+            .insert_header(crate::RequirePermissionContext {
+                account_id,
+                token: token.to_string(),
+            })
+            .to_request(),
+    )
+    .await;
 
-    assert_eq!(
-        response_json
-            .as_object()
-            .unwrap()
-            .get("status")
-            .unwrap()
-            .as_str()
-            .unwrap(),
-        "success"
-    );
+    assert_eq!(response.status(), actix_web::http::StatusCode::OK);
 
     let result: Result<ViewAccountResult, _> = serde_json::from_value(
-        response_json
+        actix_web::test::read_body_json::<serde_json::Value, _>(response)
+            .await
             .as_object()
             .unwrap()
             .get("result")
@@ -526,12 +472,14 @@ async fn view() {
 }
 
 #[serial]
-#[async_std::test]
+#[actix_web::test]
 async fn edit() {
     reset_all().await;
-    let mut app = tide::new();
-    app.at("/api/account/edit")
-        .post(crate::account::handle::edit_account);
+
+    let app = actix_web::test::init_service(
+        actix_web::App::new().service(crate::account::handle::edit_account),
+    )
+    .await;
 
     let account_id = 123456;
     let password = "password123456";
@@ -550,7 +498,6 @@ async fn edit() {
                 organization: None,
                 permissions: vec![],
                 registration_time: chrono::Utc::now(),
-                registration_ip: Some("127.0.0.1".to_string()),
                 password_sha: digest(password.to_string()),
                 token_expiration_time: 0,
             },
@@ -565,70 +512,56 @@ async fn edit() {
 
     use sms3rs_shared::account::handle::{AccountEditDescriptor, AccountEditVariant};
 
-    {
-        let descriptor_wrong_pass = AccountEditDescriptor {
-            variants: vec![AccountEditVariant::Password {
-                old: "1".to_string(),
-                new: "pass".to_string(),
-            }],
-        };
-
-        let response_json: serde_json::Value = app
-            .post("/api/account/edit")
-            .header("Token", token.to_string())
-            .header("AccountId", account_id.to_string())
-            .body_json(&descriptor_wrong_pass)
-            .unwrap()
-            .recv_json()
-            .await
-            .unwrap();
-
-        assert_ne!(
-            response_json
-                .as_object()
-                .unwrap()
-                .get("status")
-                .unwrap()
-                .as_str()
-                .unwrap(),
-            "success"
-        );
-    }
-
-    let descriptor = AccountEditDescriptor {
-        variants: vec![
-            AccountEditVariant::Name("Tianyang He".to_string()),
-            AccountEditVariant::SchoolId(2100000),
-            AccountEditVariant::Phone(114514),
-            AccountEditVariant::House(Some(sms3rs_shared::account::House::ZhengXin)),
-            AccountEditVariant::Organization(Some("SubIT".to_string())),
-            AccountEditVariant::Password {
-                old: password.to_string(),
-                new: "newpassword".to_string(),
-            },
-            AccountEditVariant::TokenExpireTime(9),
-        ],
-    };
-
-    let response_json: serde_json::Value = app
-        .post("/api/account/edit")
-        .header("Token", token.to_string())
-        .header("AccountId", account_id.to_string())
-        .body_json(&descriptor)
-        .unwrap()
-        .recv_json()
+    assert_ne!(
+        actix_web::test::call_service(
+            &app,
+            actix_web::test::TestRequest::post()
+                .uri("/api/account/edit")
+                .insert_header(crate::RequirePermissionContext {
+                    account_id,
+                    token: token.to_string()
+                })
+                .set_json(AccountEditDescriptor {
+                    variants: vec![AccountEditVariant::Password {
+                        old: "1".to_string(),
+                        new: "pass".to_string(),
+                    }],
+                })
+                .to_request(),
+        )
         .await
-        .unwrap();
+        .status(),
+        actix_web::http::StatusCode::OK
+    );
 
     assert_eq!(
-        response_json
-            .as_object()
-            .unwrap()
-            .get("status")
-            .unwrap()
-            .as_str()
-            .unwrap(),
-        "success"
+        actix_web::test::call_service(
+            &app,
+            actix_web::test::TestRequest::post()
+                .uri("/api/account/edit")
+                .insert_header(crate::RequirePermissionContext {
+                    account_id,
+                    token: token.to_string()
+                })
+                .set_json(AccountEditDescriptor {
+                    variants: vec![
+                        AccountEditVariant::Name("Tianyang He".to_string()),
+                        AccountEditVariant::SchoolId(2100000),
+                        AccountEditVariant::Phone(114514),
+                        AccountEditVariant::House(Some(sms3rs_shared::account::House::ZhengXin)),
+                        AccountEditVariant::Organization(Some("SubIT".to_string())),
+                        AccountEditVariant::Password {
+                            old: password.to_string(),
+                            new: "newpassword".to_string(),
+                        },
+                        AccountEditVariant::TokenExpireTime(9),
+                    ],
+                })
+                .to_request(),
+        )
+        .await
+        .status(),
+        actix_web::http::StatusCode::OK
     );
 
     let instance = crate::account::INSTANCE.inner().read().await;
@@ -673,14 +606,16 @@ async fn edit() {
 }
 
 #[serial]
-#[async_std::test]
+#[actix_web::test]
 async fn reset_password() {
     reset_all().await;
-    let mut app = tide::new();
-    app.at("/api/account/reset-password")
-        .post(crate::account::handle::reset_password);
-    app.at("/api/account/verify")
-        .post(crate::account::handle::verify_account);
+
+    let app = actix_web::test::init_service(
+        actix_web::App::new()
+            .service(crate::account::handle::reset_password)
+            .service(crate::account::handle::verify_account),
+    )
+    .await;
 
     let account_id = 123456;
     let password = "password123456";
@@ -698,7 +633,6 @@ async fn reset_password() {
                 organization: None,
                 permissions: vec![],
                 registration_time: chrono::Utc::now(),
-                registration_ip: Some("127.0.0.1".to_string()),
                 password_sha: digest(password.to_string()),
                 token_expiration_time: 0,
             },
@@ -707,32 +641,18 @@ async fn reset_password() {
         })
         .await;
 
-    {
-        use sms3rs_shared::account::handle::ResetPasswordDescriptor;
-
-        let descriptor = ResetPasswordDescriptor {
-            email: lettre::Address::new("yujiening2025", "i.pkuschool.edu.cn").unwrap(),
-        };
-
-        let response_json: serde_json::Value = app
-            .post("/api/account/reset-password")
-            .body_json(&descriptor)
-            .unwrap()
-            .recv_json()
-            .await
-            .unwrap();
-
-        assert_eq!(
-            response_json
-                .as_object()
-                .unwrap()
-                .get("status")
-                .unwrap()
-                .as_str()
-                .unwrap(),
-            "success"
-        );
-    }
+    assert_eq!(
+        actix_web::test::call_service(
+            &app,
+            actix_web::test::TestRequest::post()
+                .uri("/api/account/reset-password")
+                .param("email", "yujiening2025@i.pkuschool.edu.cn")
+                .to_request(),
+        )
+        .await
+        .status(),
+        actix_web::http::StatusCode::OK
+    );
 
     {
         use sms3rs_shared::account::handle::{AccountVerifyDescriptor, AccountVerifyVariant};
