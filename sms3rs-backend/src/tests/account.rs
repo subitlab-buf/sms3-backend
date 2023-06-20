@@ -658,68 +658,42 @@ async fn reset_password() {
         use sms3rs_shared::account::handle::{AccountVerifyDescriptor, AccountVerifyVariant};
 
         // Wrong verification code
-        {
-            let verification_code = crate::account::verify::VERIFICATION_CODE
-                .load(std::sync::atomic::Ordering::Relaxed)
-                - 1;
-            let descriptor = AccountVerifyDescriptor {
-                code: verification_code,
-                variant: AccountVerifyVariant::ResetPassword {
-                    email: lettre::Address::new("yujiening2025", "i.pkuschool.edu.cn").unwrap(),
-                    password: new_password.to_string(),
-                },
-            };
+        assert_ne!(
+            actix_web::test::call_service(
+                &app,
+                actix_web::test::TestRequest::post()
+                    .uri("/api/account/verify")
+                    .param("email", "yujiening2025@i.pkuschool.edu.cn")
+                    .set_json(AccountVerifyDescriptor {
+                        code: crate::account::verify::VERIFICATION_CODE
+                            .load(std::sync::atomic::Ordering::Relaxed)
+                            - 1,
+                        variant: AccountVerifyVariant::ResetPassword(new_password.to_string()),
+                    })
+                    .to_request(),
+            )
+            .await
+            .status(),
+            actix_web::http::StatusCode::OK
+        );
 
-            let response_json: serde_json::Value = app
-                .post("/api/account/verify")
-                .body_json(&descriptor)
-                .unwrap()
-                .recv_json()
-                .await
-                .unwrap();
-
-            assert_ne!(
-                response_json
-                    .as_object()
-                    .unwrap()
-                    .get("status")
-                    .unwrap()
-                    .as_str()
-                    .unwrap(),
-                "success"
-            );
-        }
-
-        {
-            let verification_code = crate::account::verify::VERIFICATION_CODE
-                .load(std::sync::atomic::Ordering::Relaxed);
-            let descriptor = AccountVerifyDescriptor {
-                code: verification_code,
-                variant: AccountVerifyVariant::ResetPassword {
-                    email: lettre::Address::new("yujiening2025", "i.pkuschool.edu.cn").unwrap(),
-                    password: new_password.to_string(),
-                },
-            };
-
-            let response_json: serde_json::Value = app
-                .post("/api/account/verify")
-                .body_json(&descriptor)
-                .unwrap()
-                .recv_json()
-                .await
-                .unwrap();
-
-            assert_eq!(
-                response_json
-                    .as_object()
-                    .unwrap()
-                    .get("status")
-                    .unwrap()
-                    .as_str()
-                    .unwrap(),
-                "success"
-            );
-        }
+        assert_eq!(
+            actix_web::test::call_service(
+                &app,
+                actix_web::test::TestRequest::post()
+                    .uri("/api/account/verify")
+                    .param("email", "yujiening2025@i.pkuschool.edu.cn")
+                    .set_json(AccountVerifyDescriptor {
+                        code: crate::account::verify::VERIFICATION_CODE
+                            .load(std::sync::atomic::Ordering::Relaxed),
+                        variant: AccountVerifyVariant::ResetPassword(new_password.to_string()),
+                    })
+                    .to_request(),
+            )
+            .await
+            .status(),
+            actix_web::http::StatusCode::OK
+        );
 
         let instance = crate::account::INSTANCE.inner().read().await;
         let a = instance
