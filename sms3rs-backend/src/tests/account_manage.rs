@@ -3,17 +3,16 @@ use std::ops::Deref;
 use super::*;
 
 use serial_test::serial;
-use sha256::digest;
-use tide_testing::TideTestingExt;
 
 #[serial]
-#[async_std::test]
+#[actix_web::test]
 async fn make() {
     reset_all().await;
 
-    let mut app = tide::new();
-    app.at("/api/account/manage/create")
-        .post(crate::account::handle::manage::make_account);
+    let app = actix_web::test::init_service(
+        actix_web::App::new().service(crate::account::handle::manage::make_account),
+    )
+    .await;
 
     let account_id = 123456;
     let password = "password123456";
@@ -32,8 +31,7 @@ async fn make() {
                 organization: None,
                 permissions: vec![sms3rs_shared::account::Permission::ManageAccounts],
                 registration_time: chrono::Utc::now(),
-                registration_ip: Some("127.0.0.1".to_string()),
-                password_sha: digest(password.to_string()),
+                password_sha: sha256::digest(password.to_string()),
                 token_expiration_time: 0,
             },
             tokens: {
@@ -61,26 +59,22 @@ async fn make() {
         ],
     };
 
-    let response_json: serde_json::Value = app
-        .post("/api/account/manage/create")
-        .header("Token", token.to_string())
-        .header("AccountId", account_id.to_string())
-        .body_json(&descriptor)
-        .unwrap()
-        .recv_json()
-        .await
-        .unwrap();
+    let response = actix_web::test::call_service(
+        &app,
+        actix_web::test::TestRequest::post()
+            .uri("/api/account/manage/create")
+            .insert_header(crate::RequirePermissionContext {
+                account_id,
+                token: token.to_string(),
+            })
+            .set_json(descriptor)
+            .to_request(),
+    )
+    .await;
 
-    assert_eq!(
-        response_json
-            .as_object()
-            .unwrap()
-            .get("status")
-            .unwrap()
-            .as_str()
-            .unwrap(),
-        "success"
-    );
+    assert_eq!(response.status(), actix_web::http::StatusCode::OK);
+
+    let response_json: serde_json::Value = actix_web::test::read_body_json(response).await;
 
     let instance = crate::account::INSTANCE.inner().read().await;
     let a = instance.get(
@@ -108,7 +102,7 @@ async fn make() {
         .await
         .has_permission(sms3rs_shared::account::Permission::ManageAccounts));
 
-    // Test for permission overflowing
+    // test for permission overflowing
     assert!(!a
         .unwrap()
         .read()
@@ -117,13 +111,14 @@ async fn make() {
 }
 
 #[serial]
-#[async_std::test]
+#[actix_web::test]
 async fn view() {
     reset_all().await;
 
-    let mut app = tide::new();
-    app.at("/api/account/manage/view")
-        .post(crate::account::handle::manage::view_account);
+    let app = actix_web::test::init_service(
+        actix_web::App::new().service(crate::account::handle::manage::view_account),
+    )
+    .await;
 
     let account_id = 123456;
     let password = "password123456";
@@ -142,8 +137,7 @@ async fn view() {
                 organization: None,
                 permissions: vec![sms3rs_shared::account::Permission::ViewAccounts],
                 registration_time: chrono::Utc::now(),
-                registration_ip: Some("127.0.0.1".to_string()),
-                password_sha: digest(password.to_string()),
+                password_sha: sha256::digest(password.to_string()),
                 token_expiration_time: 0,
             },
             tokens: {
@@ -171,8 +165,7 @@ async fn view() {
                 organization: None,
                 permissions: vec![sms3rs_shared::account::Permission::OP],
                 registration_time: chrono::Utc::now(),
-                registration_ip: Some("127.0.0.1".to_string()),
-                password_sha: digest(test_password.to_string()),
+                password_sha: sha256::digest(test_password.to_string()),
                 token_expiration_time: 0,
             },
             tokens: crate::account::verify::Tokens::new(),
@@ -192,8 +185,7 @@ async fn view() {
                 organization: None,
                 permissions: vec![],
                 registration_time: chrono::Utc::now(),
-                registration_ip: Some("127.0.0.1".to_string()),
-                password_sha: digest(test_password.to_string()),
+                password_sha: sha256::digest(test_password.to_string()),
                 token_expiration_time: 0,
             },
             tokens: crate::account::verify::Tokens::new(),
@@ -201,30 +193,26 @@ async fn view() {
         })
         .await;
 
-    let descriptor = sms3rs_shared::account::handle::manage::ViewAccountDescriptor {
-        accounts: vec![test_account_id_0, test_account_id_1],
-    };
+    let response = actix_web::test::call_service(
+        &app,
+        actix_web::test::TestRequest::post()
+            .uri("/api/account/manage/view")
+            .insert_header(crate::RequirePermissionContext {
+                account_id,
+                token: token.to_string(),
+            })
+            .set_json(
+                sms3rs_shared::account::handle::manage::ViewAccountDescriptor {
+                    accounts: vec![test_account_id_0, test_account_id_1],
+                },
+            )
+            .to_request(),
+    )
+    .await;
 
-    let response_json: serde_json::Value = app
-        .post("/api/account/manage/view")
-        .header("Token", token.to_string())
-        .header("AccountId", account_id.to_string())
-        .body_json(&descriptor)
-        .unwrap()
-        .recv_json()
-        .await
-        .unwrap();
+    assert_eq!(response.status(), actix_web::http::StatusCode::OK);
 
-    assert_eq!(
-        response_json
-            .as_object()
-            .unwrap()
-            .get("status")
-            .unwrap()
-            .as_str()
-            .unwrap(),
-        "success"
-    );
+    let response_json: serde_json::Value = actix_web::test::read_body_json(response).await;
 
     let result: Vec<sms3rs_shared::account::handle::manage::ViewAccountResult> = response_json
         .as_object()
@@ -263,13 +251,14 @@ async fn view() {
 }
 
 #[serial]
-#[async_std::test]
+#[actix_web::test]
 async fn modify() {
     reset_all().await;
 
-    let mut app = tide::new();
-    app.at("/api/account/manage/modify")
-        .post(crate::account::handle::manage::modify_account);
+    let app = actix_web::test::init_service(
+        actix_web::App::new().service(crate::account::handle::manage::modify_account),
+    )
+    .await;
 
     let account_id = 123456;
     let password = "password123456";
@@ -288,8 +277,7 @@ async fn modify() {
                 organization: None,
                 permissions: vec![sms3rs_shared::account::Permission::ManageAccounts],
                 registration_time: chrono::Utc::now(),
-                registration_ip: Some("127.0.0.1".to_string()),
-                password_sha: digest(password.to_string()),
+                password_sha: sha256::digest(password.to_string()),
                 token_expiration_time: 0,
             },
             tokens: {
@@ -317,8 +305,7 @@ async fn modify() {
                 organization: None,
                 permissions: vec![sms3rs_shared::account::Permission::OP],
                 registration_time: chrono::Utc::now(),
-                registration_ip: Some("127.0.0.1".to_string()),
-                password_sha: digest(test_password.to_string()),
+                password_sha: sha256::digest(test_password.to_string()),
                 token_expiration_time: 0,
             },
             tokens: crate::account::verify::Tokens::new(),
@@ -338,8 +325,7 @@ async fn modify() {
                 organization: None,
                 permissions: vec![],
                 registration_time: chrono::Utc::now(),
-                registration_ip: Some("127.0.0.1".to_string()),
-                password_sha: digest(test_password.to_string()),
+                password_sha: sha256::digest(test_password.to_string()),
                 token_expiration_time: 0,
             },
             tokens: crate::account::verify::Tokens::new(),
@@ -352,69 +338,61 @@ async fn modify() {
         Permission,
     };
 
-    {
-        let descriptor = ModifyAccountDescriptor {
-            account_id: test_account_id_0,
-            variants: vec![AccountModifyVariant::Name("Tianyang He".to_string())],
-        };
-
-        let response_json: serde_json::Value = app
-            .post("/api/account/manage/modify")
-            .header("Token", token.to_string())
-            .header("AccountId", account_id.to_string())
-            .body_json(&descriptor)
-            .unwrap()
-            .recv_json()
-            .await
-            .unwrap();
-
-        assert_ne!(
-            response_json
-                .as_object()
-                .unwrap()
-                .get("status")
-                .unwrap()
-                .as_str()
-                .unwrap(),
-            "success"
-        );
-    }
+    assert_ne!(
+        actix_web::test::call_service(
+            &app,
+            actix_web::test::TestRequest::post()
+                .uri("/api/account/manage/view")
+                .insert_header(crate::RequirePermissionContext {
+                    account_id,
+                    token: token.to_string(),
+                })
+                .set_json(ModifyAccountDescriptor {
+                    account_id: test_account_id_0,
+                    variants: vec![AccountModifyVariant::Name("Tianyang He".to_string())],
+                })
+                .to_request(),
+        )
+        .await
+        .status(),
+        actix_web::http::StatusCode::OK
+    );
 
     {
-        let descriptor = ModifyAccountDescriptor {
-            account_id: test_account_id_1,
-            variants: vec![
-                AccountModifyVariant::Email(
-                    lettre::Address::new("hetianyang2021", "i.pkuschool.edu.cn").unwrap(),
-                ),
-                AccountModifyVariant::Name("Tianyang He".to_string()),
-                AccountModifyVariant::SchoolId(2100000),
-                AccountModifyVariant::Phone(1),
-                AccountModifyVariant::House(Some(sms3rs_shared::account::House::ZhengXin)),
-                AccountModifyVariant::Organization(Some("SubIT".to_string())),
-                AccountModifyVariant::Permission(vec![Permission::ManageAccounts, Permission::OP]),
-            ],
-        };
-
-        let response_json: serde_json::Value = app
-            .post("/api/account/manage/modify")
-            .header("Token", token.to_string())
-            .header("AccountId", account_id.to_string())
-            .body_json(&descriptor)
-            .unwrap()
-            .recv_json()
-            .await
-            .unwrap();
-
         assert_eq!(
-            response_json
-                .as_object()
-                .unwrap()
-                .get("status")
-                .unwrap()
-                .as_str()
-                .unwrap(),
-            "success"
+            actix_web::test::call_service(
+                &app,
+                actix_web::test::TestRequest::post()
+                    .uri("/api/account/manage/view")
+                    .insert_header(crate::RequirePermissionContext {
+                        account_id,
+                        token: token.to_string(),
+                    })
+                    .set_json(ModifyAccountDescriptor {
+                        account_id: test_account_id_1,
+                        variants: vec![
+                            AccountModifyVariant::Email(
+                                lettre::Address::new("hetianyang2021", "i.pkuschool.edu.cn")
+                                    .unwrap(),
+                            ),
+                            AccountModifyVariant::Name("Tianyang He".to_string()),
+                            AccountModifyVariant::SchoolId(2100000),
+                            AccountModifyVariant::Phone(1),
+                            AccountModifyVariant::House(Some(
+                                sms3rs_shared::account::House::ZhengXin
+                            )),
+                            AccountModifyVariant::Organization(Some("SubIT".to_string())),
+                            AccountModifyVariant::Permission(vec![
+                                Permission::ManageAccounts,
+                                Permission::OP
+                            ]),
+                        ],
+                    })
+                    .to_request(),
+            )
+            .await
+            .status(),
+            actix_web::http::StatusCode::OK
         );
 
         let am = crate::account::INSTANCE.inner().read().await;
