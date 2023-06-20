@@ -5,7 +5,7 @@ use super::*;
 use serial_test::serial;
 
 #[serial]
-#[actix_web::test]
+#[tokio::test]
 async fn make() {
     reset_all().await;
 
@@ -111,7 +111,7 @@ async fn make() {
 }
 
 #[serial]
-#[actix_web::test]
+#[tokio::test]
 async fn view() {
     reset_all().await;
 
@@ -251,7 +251,7 @@ async fn view() {
 }
 
 #[serial]
-#[actix_web::test]
+#[tokio::test]
 async fn modify() {
     reset_all().await;
 

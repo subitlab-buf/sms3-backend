@@ -6,7 +6,7 @@ use std::ops::Deref;
 
 /// Test: create an account and verify it.
 #[serial]
-#[actix_web::test]
+#[tokio::test]
 async fn registry() {
     reset_all().await;
 
@@ -99,7 +99,7 @@ async fn registry() {
 
 /// Test for logging in an account.
 #[serial]
-#[actix_web::test]
+#[tokio::test]
 async fn login() {
     reset_all().await;
 
@@ -183,7 +183,7 @@ async fn login() {
 
 /// Test for usage of `RequirePermissionContext`.
 #[serial]
-#[actix_web::test]
+#[tokio::test]
 async fn require_permission_context() {
     reset_all().await;
 
@@ -258,7 +258,7 @@ async fn require_permission_context() {
 
 /// Test for logging out an account.
 #[serial]
-#[actix_web::test]
+#[tokio::test]
 async fn logout() {
     reset_all().await;
 
@@ -320,7 +320,7 @@ async fn logout() {
 }
 
 #[serial]
-#[actix_web::test]
+#[tokio::test]
 async fn signout() {
     reset_all().await;
 
@@ -403,7 +403,7 @@ async fn signout() {
 }
 
 #[serial]
-#[actix_web::test]
+#[tokio::test]
 async fn view() {
     reset_all().await;
 
@@ -472,7 +472,7 @@ async fn view() {
 }
 
 #[serial]
-#[actix_web::test]
+#[tokio::test]
 async fn edit() {
     reset_all().await;
 
@@ -606,7 +606,7 @@ async fn edit() {
 }
 
 #[serial]
-#[actix_web::test]
+#[tokio::test]
 async fn reset_password() {
     reset_all().await;
 

@@ -5,7 +5,7 @@ use serial_test::serial;
 const TEST_POST_IMG: &[u8; 108416] = include_bytes!("../../../test-resources/test_post.png");
 
 #[serial]
-#[actix_web::test]
+#[tokio::test]
 async fn cache_image() {
     reset_all().await;
 
@@ -73,7 +73,7 @@ async fn cache_image() {
 }
 
 #[serial]
-#[actix_web::test]
+#[tokio::test]
 async fn new() {
     reset_all().await;
 

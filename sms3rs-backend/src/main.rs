@@ -9,7 +9,7 @@ mod post;
 #[cfg(test)]
 mod tests;
 
-#[actix_web::main]
+#[tokio::main]
 async fn main() -> std::io::Result<()> {
     account::INSTANCE.refresh_all().await;
 
