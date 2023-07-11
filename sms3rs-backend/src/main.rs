@@ -7,14 +7,15 @@ mod post;
 mod tests;
 
 use account::{AccountManagerError, Permissions};
+use axum::{async_trait, http::StatusCode, routing::post};
 use std::ops::Deref;
-use tide::Request;
 
-#[async_std::main]
-async fn main() -> tide::Result<()> {
-    let mut app = tide::new();
-    tide::log::with_level(tide::log::LevelFilter::Debug);
-    account::INSTANCE.refresh_all().await;
+#[tokio::main]
+async fn main() {
+    account::INSTANCE.refresh_all();
+
+    // use an external function here so this won't be in a proc macro for betting coding experience
+    run().await.unwrap();
 
     // Basic account controlling
     app.at("/api/account/create")
@@ -57,6 +58,18 @@ async fn main() -> tide::Result<()> {
     Ok(())
 }
 
+async fn run() -> anyhow::Result<()> {
+    let app = axum::Router::new()
+        .route("/api/account/create", post(account::handle::create_account))
+        .route("/api/account/verify", post(account::handle::verify_account));
+
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], 8080));
+    axum::Server::bind(&addr)
+        .serve(app.into_make_service())
+        .await?;
+    Ok(())
+}
+
 /// A context for checking the validation of action an account performs with permission requirements.
 pub struct RequirePermissionContext {
     /// The access token of this account.
@@ -67,19 +80,16 @@ pub struct RequirePermissionContext {
 
 impl RequirePermissionContext {
     /// Indicates whether this context's token and permissions is valid.
-    pub async fn valid(&self, permissions: Permissions) -> Result<bool, AccountManagerError> {
-        let account_manager = account::INSTANCE.deref();
-        match account_manager
+    pub fn valid(&self, permissions: Permissions) -> Result<bool, AccountManagerError> {
+        match account::INSTANCE
             .index()
-            .read()
-            .await
             .get(&self.account_id)
-            .copied()
+            .map(|e| *e.value())
         {
             Some(index) => {
-                account_manager.refresh(self.account_id).await;
-                let b = account_manager.inner().read().await;
-                let account = b.get(index).unwrap().read().await;
+                account::INSTANCE.refresh(self.account_id);
+                let b = account::INSTANCE.inner().read();
+                let account = b.get(index).unwrap().read();
                 Ok(match account.deref() {
                     account::Account::Unverified(_) => {
                         return Err(AccountManagerError::Account(
@@ -93,20 +103,53 @@ impl RequirePermissionContext {
             None => Err(AccountManagerError::AccountNotFound(self.account_id)),
         }
     }
+}
 
-    pub fn from_header(request: &Request<()>) -> Option<Self> {
-        Some(Self {
-            token: match request.header("Token") {
-                Some(e) => e.as_str().to_string(),
-                None => return None,
+#[async_trait]
+impl<S> axum::extract::FromRequestParts<S> for RequirePermissionContext {
+    type Rejection = (StatusCode, axum::Json<serde_json::Value>);
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        _: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let mut this = Self {
+            token: match parts.headers.get("Token") {
+                Some(value) => value.to_str().unwrap_or_default().to_string(),
+                None => {
+                    return Err((
+                        StatusCode::BAD_REQUEST,
+                        axum::Json(
+                            serde_json::json!({ "error": "no valid token field found in headers"}),
+                        ),
+                    ))
+                }
             },
-            account_id: match request.header("AccountId") {
-                Some(e) => match e.as_str().parse() {
-                    Ok(n) => n,
-                    Err(_) => return None,
-                },
-                None => return None,
+            account_id: match parts.headers.get("AccountId") {
+                Some(value) => value
+                    .to_str()
+                    .unwrap_or_default()
+                    .to_string()
+                    .parse()
+                    .unwrap_or_default(),
+                None => {
+                    return Err((
+                        StatusCode::BAD_REQUEST,
+                        axum::Json(
+                            serde_json::json!({ "error": "no valid account id field found in headers"}),
+                        ),
+                    ))
+                }
             },
-        })
+        };
+
+        if !this.valid(vec![]).unwrap_or_default() {
+            return Err((
+                StatusCode::FORBIDDEN,
+                axum::Json(serde_json::json!({ "error": "permission denied" })),
+            ));
+        }
+
+        Ok(this)
     }
 }

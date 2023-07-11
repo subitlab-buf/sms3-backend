@@ -2,10 +2,11 @@ use super::AccountError;
 use chrono::{Days, NaiveDateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha256::digest;
-use tide::log::info;
 
 #[cfg(not(test))]
 use once_cell::sync::Lazy;
+
+use tracing::info;
 
 #[cfg(not(test))]
 pub(super) static SENDER_INSTANCE: Lazy<VerificationSender> = Lazy::new(VerificationSender::new);
@@ -126,12 +127,12 @@ impl VerificationSender {
         }
     }
 
-    fn mailer(&self) -> lettre::AsyncSmtpTransport<lettre::AsyncStd1Executor> {
+    fn mailer(&self) -> lettre::AsyncSmtpTransport<lettre::Tokio1Executor> {
         use lettre::{
-            transport::smtp::authentication::Credentials, AsyncSmtpTransport, AsyncStd1Executor,
+            transport::smtp::authentication::Credentials, AsyncSmtpTransport, Tokio1Executor,
         };
 
-        AsyncSmtpTransport::<AsyncStd1Executor>::relay(&self.config.server)
+        AsyncSmtpTransport::<Tokio1Executor>::relay(&self.config.server)
             .unwrap()
             .port(self.config.port)
             .credentials(Credentials::new(

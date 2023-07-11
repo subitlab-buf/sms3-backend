@@ -1,19 +1,20 @@
 pub mod handle;
 pub mod verify;
 
-use async_std::sync::RwLock;
 use chrono::{DateTime, Duration, Utc};
+use dashmap::DashMap;
 use once_cell::sync::Lazy;
+use parking_lot::RwLock;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use sha256::digest;
 use std::{
-    collections::{hash_map::DefaultHasher, HashMap},
+    collections::hash_map::DefaultHasher,
     fmt::Display,
     hash::{Hash, Hasher},
     ops::{Deref, DerefMut},
 };
-use tide::log::error;
+use tracing::error;
 
 pub use sms3rs_shared::account::*;
 
@@ -248,19 +249,17 @@ impl Account {
     /// Save this account and return whether if this account was saved successfully.
     #[cfg(not(test))]
     #[must_use = "The save result should be handled"]
-    pub async fn save(&self) -> bool {
-        use async_std::fs::File;
-        use async_std::io::WriteExt;
+    pub fn save(&self) -> bool {
+        use std::io::Write;
 
-        if let Ok(mut file) = File::create(format!("./data/accounts/{}.toml", self.id())).await {
-            file.write_all(
+        if let Ok(mut file) = std::fs::File::create(format!("./data/accounts/{}.toml", self.id())) {
+            file.write(
                 match toml::to_string(&self) {
                     Ok(e) => e,
                     _ => return false,
                 }
                 .as_bytes(),
             )
-            .await
             .is_ok()
         } else {
             false
@@ -270,14 +269,14 @@ impl Account {
     /// Save this account and return whether if this account was saved successfully.
     #[cfg(test)]
     #[must_use = "The save result should be handled"]
-    pub async fn save(&self) -> bool {
+    pub fn save(&self) -> bool {
         true
     }
 
     /// Remove this account from filesystem and return whether this account was removed successfully.
     #[cfg(not(test))]
     pub async fn remove(&self) -> bool {
-        async_std::fs::remove_file(format!("./data/accounts/{}.json", self.id()))
+        tokio::fs::remove_file(format!("./data/accounts/{}.json", self.id()))
             .await
             .is_ok()
     }
@@ -321,8 +320,6 @@ pub struct UserAttributes {
     pub permissions: Permissions,
     /// The registration time of this user.
     pub registration_time: DateTime<Utc>,
-    /// The registration ip of this user.
-    pub registration_ip: Option<String>,
     /// Hash of this user's password.
     pub password_sha: String,
     /// The expiration time of a token in days.
@@ -360,7 +357,7 @@ impl std::error::Error for AccountManagerError {}
 pub struct AccountManager {
     accounts: RwLock<Vec<RwLock<Account>>>,
     /// An index cache for getting index from an id.
-    index: RwLock<HashMap<u64, usize>>,
+    index: DashMap<u64, usize>,
 }
 
 impl AccountManager {
@@ -372,7 +369,7 @@ impl AccountManager {
             use std::io::Read;
 
             let mut vec = Vec::new();
-            let mut index = HashMap::new();
+            let index = DashMap::new();
             let mut i = 0;
             for dir in fs::read_dir("./data/accounts").unwrap() {
                 if let Ok(e) = dir.map(|e| {
@@ -395,14 +392,14 @@ impl AccountManager {
             }
             Self {
                 accounts: RwLock::new(vec),
-                index: RwLock::new(index),
+                index,
             }
         }
 
         #[cfg(test)]
         Self {
             accounts: RwLock::new(Vec::new()),
-            index: RwLock::new(HashMap::new()),
+            index: DashMap::new(),
         }
     }
 
@@ -412,30 +409,28 @@ impl AccountManager {
     }
 
     /// Get inner indexe cache.
-    pub fn index(&self) -> &RwLock<HashMap<u64, usize>> {
+    pub fn index(&self) -> &DashMap<u64, usize> {
         &self.index
     }
 
     /// Update index cache of this instance.
-    pub async fn update_index(&self) {
-        let mut map = HashMap::new();
-        for account in self.accounts.read().await.iter().enumerate() {
-            map.insert(account.1.read().await.id(), account.0);
+    pub fn update_index(&self) {
+        self.index.clear();
+        for account in self.accounts.read().iter().enumerate() {
+            self.index.insert(account.1.read().id(), account.0);
         }
-        let mut iw = self.index.write().await;
-        *iw.deref_mut() = map;
     }
 
     /// Refresh this instance.
     ///
     /// - Remove expired unverified accounts
     /// - Remove expired tokens
-    pub async fn refresh_all(&self) {
+    pub fn refresh_all(&self) {
         {
             let mut rm_list: Vec<usize> = Vec::new();
-            for account in self.accounts.read().await.iter().enumerate() {
+            for account in self.accounts.read().iter().enumerate() {
                 {
-                    let r_binding = account.1.read().await;
+                    let r_binding = account.1.read();
                     if match r_binding.deref() {
                         Account::Unverified(cxt) => cxt.is_expired(),
                         _ => false,
@@ -444,17 +439,18 @@ impl AccountManager {
                     }
                 }
             }
-            let mut w = self.accounts.write().await;
+            let mut w = self.accounts.write();
             for i in rm_list.iter().enumerate() {
                 w.remove(*i.1 - i.0);
             }
             if !rm_list.is_empty() {
-                self.update_index().await;
+                self.update_index();
             }
         }
+
         {
-            for account in self.accounts.read().await.iter() {
-                let mut w = account.write().await;
+            for account in self.accounts.read().iter() {
+                let mut w = account.write();
                 if let Account::Verified { tokens, verify, .. } = w.deref_mut() {
                     tokens.refresh();
                     if match verify {
@@ -472,19 +468,19 @@ impl AccountManager {
     ///
     /// - Remove expired unverified account;
     /// - Remove expired tokens.
-    pub async fn refresh(&self, id: u64) {
-        if let Some(index) = self.index.read().await.get(&id) {
-            if let Some(account) = self.accounts.read().await.get(*index) {
+    pub fn refresh(&self, id: u64) {
+        if let Some(index) = self.index.get(&id) {
+            if let Some(account) = self.accounts.read().get(*index) {
                 {
-                    if match account.read().await.deref() {
+                    if match account.read().deref() {
                         Account::Unverified(cxt) => cxt.is_expired(),
                         _ => false,
                     } {
-                        self.remove(id).await;
+                        self.remove(id);
                     }
                 }
                 {
-                    match account.write().await.deref_mut() {
+                    match account.write().deref_mut() {
                         Account::Verified { tokens, verify, .. } => {
                             tokens.refresh();
                             if match verify {
@@ -502,32 +498,30 @@ impl AccountManager {
     }
 
     /// Remove target account.
-    pub async fn remove(&self, id: u64) {
-        if let Some(index) = self.index.read().await.get(&id) {
+    pub fn remove(&self, id: u64) {
+        if let Some(index) = self.index.get(&id) {
             {
-                let b = self.accounts.read().await;
-                b.get(*index).unwrap().read().await.remove().await;
+                let b = self.accounts.read();
+                b.get(*index).unwrap().read().remove();
             }
-            self.accounts.write().await.remove(*index);
+            self.accounts.write().remove(*index);
         }
-        self.update_index().await;
+        self.update_index();
     }
 
     /// Push an account to this instance, only for testing.
     #[cfg(test)]
-    pub async fn push(&self, account: Account) {
+    pub fn push(&self, account: Account) {
         assert!(self
             .index
-            .write()
-            .await
-            .insert(account.id(), self.accounts.read().await.len())
+            .insert(account.id(), self.accounts.read().len())
             .is_none());
-        self.accounts.write().await.push(RwLock::new(account));
+        self.accounts.write().push(RwLock::new(account));
     }
 
     #[cfg(test)]
-    pub async fn reset(&self) {
-        *self.accounts.write().await.deref_mut() = Vec::new();
-        *self.index.write().await.deref_mut() = HashMap::new();
+    pub fn reset(&self) {
+        *self.accounts.write().deref_mut() = Vec::new();
+        self.index.clear()
     }
 }
