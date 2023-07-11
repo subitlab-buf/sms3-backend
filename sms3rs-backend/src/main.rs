@@ -17,24 +17,6 @@ async fn main() {
     // use an external function here so this won't be in a proc macro for betting coding experience
     run().await.unwrap();
 
-    // Basic account controlling
-    app.at("/api/account/create")
-        .post(account::handle::create_account);
-    app.at("/api/account/verify")
-        .post(account::handle::verify_account);
-    app.at("/api/account/login")
-        .post(account::handle::login_account);
-    app.at("/api/account/logout")
-        .post(account::handle::logout_account);
-    app.at("/api/account/signout")
-        .post(account::handle::sign_out_account);
-    app.at("/api/account/view")
-        .get(account::handle::view_account);
-    app.at("/api/account/edit")
-        .post(account::handle::edit_account);
-    app.at("/api/account/reset-password")
-        .post(account::handle::reset_password);
-
     // Account managing
     app.at("/api/account/manage/create")
         .post(account::handle::manage::make_account);
@@ -61,7 +43,19 @@ async fn main() {
 async fn run() -> anyhow::Result<()> {
     let app = axum::Router::new()
         .route("/api/account/create", post(account::handle::create_account))
-        .route("/api/account/verify", post(account::handle::verify_account));
+        .route("/api/account/verify", post(account::handle::verify_account))
+        .route("/api/account/login", post(account::handle::login_account))
+        .route("/api/account/logout", post(account::handle::logout_account))
+        .route(
+            "/api/account/signout",
+            post(account::handle::sign_out_account),
+        )
+        .route("/api/account/view", post(account::handle::view_account))
+        .route("/api/account/edit", post(account::handle::edit_account))
+        .route(
+            "/api/account/reset-password",
+            post(account::handle::reset_password),
+        );
 
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], 8080));
     axum::Server::bind(&addr)

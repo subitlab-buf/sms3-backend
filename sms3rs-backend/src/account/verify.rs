@@ -1,4 +1,3 @@
-use super::AccountError;
 use chrono::{Days, NaiveDateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha256::digest;
@@ -26,27 +25,29 @@ pub struct Context {
 }
 
 impl Context {
-    pub async fn send_verify(&self) -> Result<(), AccountError> {
+    pub fn send_verify(&self) {
         info!(
             "Sending verification code for {} (code: {})",
             self.email, self.code
         );
 
-        #[cfg(not(test))]
-        {
-            SENDER_INSTANCE
-                .send_verification(self)
-                .await
-                .map_err(|err| AccountError::MailSendError(err.to_string()))?;
-        }
+        tokio::spawn(async move {
+            #[cfg(not(test))]
+            {
+                SENDER_INSTANCE
+                    .send_verification(self)
+                    .await
+                    .map_err(|err| AccountError::MailSendError(err.to_string()))
+                    .unwrap();
+            }
 
-        #[cfg(test)]
-        {
-            VERIFICATION_CODE.store(self.code, std::sync::atomic::Ordering::Relaxed);
-        }
+            #[cfg(test)]
+            {
+                VERIFICATION_CODE.store(self.code, std::sync::atomic::Ordering::Relaxed);
+            }
 
-        info!("Verification code for {} sent", self.email);
-        Ok(())
+            info!("Verification code for {} sent", self.email);
+        });
     }
 
     /// Whether this context was expired.

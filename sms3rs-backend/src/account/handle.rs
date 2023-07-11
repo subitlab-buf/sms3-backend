@@ -177,7 +177,7 @@ pub async fn login_account(
         let mut aw = account.write();
         let token = aw.login(&descriptor.password);
 
-        if !aw.save().await {
+        if !aw.save() {
             error!("Error when saving account {}", aw.email());
         }
 
@@ -221,7 +221,7 @@ pub async fn logout_account(
             let mut aw = b.get(index).unwrap().write();
             match aw.logout(&ctx.token) {
                 Ok(_) => {
-                    if !aw.save().await {
+                    if !aw.save() {
                         error!("Error when saving account {}", aw.email());
                     }
 
@@ -346,7 +346,7 @@ pub async fn edit_account(
         }
     }
 
-    if !a.save().await {
+    if !a.save() {
         error!("Error when saving account {}", a.email());
     }
 
@@ -379,6 +379,7 @@ pub fn apply_edit_variant(
 }
 
 /// Initialize a reset password verification.
+#[axum_macros::debug_handler]
 pub async fn reset_password(
     Json(descriptor): Json<ResetPasswordDescriptor>,
 ) -> (StatusCode, Json<serde_json::Value>) {
@@ -398,7 +399,9 @@ pub async fn reset_password(
                 Account::Verified { verify, .. } => {
                     if matches!(verify, UserVerifyVariant::None) {
                         drop(ar);
+
                         let mut aw = account.write();
+
                         let ret = if let Account::Verified { verify, .. } = aw.deref_mut() {
                             *verify = UserVerifyVariant::ForgetPassword({
                                 let ctx = verify::Context {
@@ -410,12 +413,8 @@ pub async fn reset_password(
                                     expire_time: Utc::now().naive_utc() + Duration::minutes(15),
                                 };
 
-                                if let Err(err) = ctx.send_verify().await {
-                                    return (
-                                        StatusCode::INTERNAL_SERVER_ERROR,
-                                        Json(json!({ "error": err.to_string() })),
-                                    );
-                                }
+                                ctx.send_verify();
+
                                 ctx
                             });
 
@@ -424,7 +423,7 @@ pub async fn reset_password(
                             unreachable!()
                         };
 
-                        if !aw.save().await {
+                        if !aw.save() {
                             error!("Error when saving account {}", aw.email());
                         }
 
