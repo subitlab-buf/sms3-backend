@@ -14,26 +14,14 @@ use std::ops::Deref;
 async fn main() {
     account::INSTANCE.refresh_all();
 
-    // use an external function here so this won't be in a proc macro for betting coding experience
+    // use an external function here so this won't be in a proc macros
+    // for betting coding experience
     run().await.unwrap();
-
-    // Posting
-    app.at("/api/post/upload-image")
-        .post(post::handle::cache_image);
-    app.at("/api/post/get-image").post(post::handle::get_image);
-    app.at("/api/post/create").post(post::handle::new_post);
-    app.at("/api/post/get").post(post::handle::get_posts);
-    app.at("/api/post/edit").post(post::handle::edit_post);
-    app.at("/api/post/get-info")
-        .post(post::handle::get_posts_info);
-    app.at("/api/post/approve").post(post::handle::approve_post);
-
-    app.listen("127.0.0.1:8080").await?;
-    Ok(())
 }
 
 async fn run() -> anyhow::Result<()> {
     let app = axum::Router::new()
+        // account
         .route("/api/account/create", post(account::handle::create_account))
         .route("/api/account/verify", post(account::handle::verify_account))
         .route("/api/account/login", post(account::handle::login_account))
@@ -48,6 +36,7 @@ async fn run() -> anyhow::Result<()> {
             "/api/account/reset-password",
             post(account::handle::reset_password),
         )
+        // account management
         .route(
             "/api/account/manage/create",
             post(account::handle::manage::make_account),
@@ -59,16 +48,27 @@ async fn run() -> anyhow::Result<()> {
         .route(
             "/api/account/manage/modify",
             post(account::handle::manage::modify_account),
-        );
+        )
+        .route("/api/post/upload-image", post(post::handle::cache_image))
+        .route("/api/post/get-image", post(post::handle::get_image))
+        .route("/api/post/create", post(post::handle::new_post))
+        .route("/api/post/get", post(post::handle::get_posts))
+        .route("/api/post/edit", post(post::handle::edit_post))
+        .route("/api/post/get-info", post(post::handle::get_posts_info))
+        .route("/api/post/approve", post(post::handle::approve_post));
 
+    // socket in 127.0.0.1:8080
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], 8080));
+
     axum::Server::bind(&addr)
         .serve(app.into_make_service())
         .await?;
+
     Ok(())
 }
 
-/// A context for checking the validation of action an account performs with permission requirements.
+/// A context for checking the validation of action an account
+/// performs with permission requirements.
 pub struct RequirePermissionContext {
     /// The access token of this account.
     pub token: String,
@@ -111,33 +111,32 @@ impl<S> axum::extract::FromRequestParts<S> for RequirePermissionContext {
         parts: &mut axum::http::request::Parts,
         _: &S,
     ) -> Result<Self, Self::Rejection> {
-        let mut this = Self {
-            token: match parts.headers.get("Token") {
-                Some(value) => value.to_str().unwrap_or_default().to_string(),
-                None => {
-                    return Err((
-                        StatusCode::BAD_REQUEST,
-                        axum::Json(
-                            serde_json::json!({ "error": "no valid token field found in headers"}),
-                        ),
-                    ))
-                }
+        let this = Self {
+            token: if let Some(value) = parts.headers.get("Token") {
+                value.to_str().unwrap_or_default().to_string()
+            } else {
+                return Err((
+                    StatusCode::UNAUTHORIZED,
+                    axum::Json(
+                        serde_json::json!({ "error": "no valid token field found in headers"}),
+                    ),
+                ));
             },
-            account_id: match parts.headers.get("AccountId") {
-                Some(value) => value
+
+            account_id: if let Some(value) = parts.headers.get("AccountId") {
+                value
                     .to_str()
                     .unwrap_or_default()
                     .to_string()
                     .parse()
-                    .unwrap_or_default(),
-                None => {
-                    return Err((
-                        StatusCode::BAD_REQUEST,
-                        axum::Json(
-                            serde_json::json!({ "error": "no valid account id field found in headers"}),
-                        ),
-                    ))
-                }
+                    .unwrap_or_default()
+            } else {
+                return Err((
+                    StatusCode::UNAUTHORIZED,
+                    axum::Json(
+                        serde_json::json!({ "error": "no valid account id field found in headers"}),
+                    ),
+                ));
             },
         };
 

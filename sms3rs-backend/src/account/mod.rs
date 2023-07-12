@@ -14,7 +14,6 @@ use std::{
     hash::{Hash, Hasher},
     ops::{Deref, DerefMut},
 };
-use tracing::error;
 
 pub use sms3rs_shared::account::*;
 
@@ -106,10 +105,7 @@ impl Account {
                     _ => return Err(AccountError::DateOutOfRangeError),
                 },
             };
-            cxt.send_verify().await.map_err(|err| {
-                error!("Error while sending verification email: {}", err);
-                err
-            })?;
+            cxt.send_verify();
             cxt
         }))
     }
@@ -247,44 +243,35 @@ impl Account {
     }
 
     /// Save this account and return whether if this account was saved successfully.
-    #[cfg(not(test))]
-    #[must_use = "The save result should be handled"]
-    pub fn save(&self) -> bool {
-        use std::io::Write;
+    pub fn save(&self) {
+        #[cfg(not(test))]
+        {
+            let id = self.id();
+            let data = toml::to_string(&self).unwrap_or_default();
 
-        if let Ok(mut file) = std::fs::File::create(format!("./data/accounts/{}.toml", self.id())) {
-            file.write(
-                match toml::to_string(&self) {
-                    Ok(e) => e,
-                    _ => return false,
-                }
-                .as_bytes(),
-            )
-            .is_ok()
-        } else {
-            false
+            tokio::spawn(async move {
+                use tokio::io::AsyncWriteExt;
+
+                let mut file = tokio::fs::File::create(format!("./data/accounts/{}.toml", id))
+                    .await
+                    .unwrap();
+                file.write(data.as_bytes()).await.unwrap();
+            });
         }
     }
 
-    /// Save this account and return whether if this account was saved successfully.
-    #[cfg(test)]
-    #[must_use = "The save result should be handled"]
-    pub fn save(&self) -> bool {
-        true
-    }
-
     /// Remove this account from filesystem and return whether this account was removed successfully.
-    #[cfg(not(test))]
-    pub async fn remove(&self) -> bool {
-        tokio::fs::remove_file(format!("./data/accounts/{}.json", self.id()))
-            .await
-            .is_ok()
-    }
+    pub fn remove(&self) {
+        #[cfg(not(test))]
+        {
+            let id = self.id();
 
-    /// Remove this account from filesystem and return whether this account was removed successfully.
-    #[cfg(test)]
-    pub async fn remove(&self) -> bool {
-        true
+            tokio::spawn(async move {
+                tokio::fs::remove_file(format!("./data/accounts/{}.json", id))
+                    .await
+                    .unwrap()
+            });
+        }
     }
 }
 

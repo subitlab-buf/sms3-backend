@@ -14,7 +14,7 @@ pub(super) static SENDER_INSTANCE: Lazy<VerificationSender> = Lazy::new(Verifica
 pub static VERIFICATION_CODE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 /// Represent infos of an unverified object.
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Context {
     /// The email address.
     pub email: lettre::Address,
@@ -31,22 +31,20 @@ impl Context {
             self.email, self.code
         );
 
+        let this = self.clone();
+
         tokio::spawn(async move {
             #[cfg(not(test))]
             {
-                SENDER_INSTANCE
-                    .send_verification(self)
-                    .await
-                    .map_err(|err| AccountError::MailSendError(err.to_string()))
-                    .unwrap();
+                SENDER_INSTANCE.send_verification(&this).await.unwrap();
             }
 
             #[cfg(test)]
             {
-                VERIFICATION_CODE.store(self.code, std::sync::atomic::Ordering::Relaxed);
+                VERIFICATION_CODE.store(this.code, std::sync::atomic::Ordering::Relaxed);
             }
 
-            info!("Verification code for {} sent", self.email);
+            info!("Verification code for {} sent", this.email);
         });
     }
 

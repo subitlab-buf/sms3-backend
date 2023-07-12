@@ -15,7 +15,6 @@ use serde_json::json;
 use sha256::digest;
 use std::ops::Deref;
 use std::ops::DerefMut;
-use tracing::error;
 use tracing::info;
 
 use sms3rs_shared::account::handle::*;
@@ -55,11 +54,7 @@ pub async fn create_account(
     );
 
     super::INSTANCE.index().insert(account.id(), len);
-
-    if !account.save() {
-        error!("Error while saving account {}", account.email());
-    }
-
+    account.save();
     super::INSTANCE.inner().write().push(RwLock::new(account));
 
     (StatusCode::OK, Json(json!({})))
@@ -114,10 +109,7 @@ pub async fn verify_account(
                         );
                     }
 
-                    if !a.save() {
-                        error!("Error when saving account {}", a.email());
-                    }
-
+                    a.save();
                     info!("Account verified: {} (id: {})", a.email(), a.id());
                     return (StatusCode::OK, Json(json!({ "account_id": id })));
                 }
@@ -147,10 +139,7 @@ pub async fn verify_account(
                         );
                     }
 
-                    if !a.save() {
-                        error!("Error when saving account {}", a.email());
-                    }
-
+                    a.save();
                     info!("Password reseted: {} (id: {})", a.email(), a.id());
                     return (StatusCode::OK, Json(json!({})));
                 }
@@ -177,9 +166,7 @@ pub async fn login_account(
         let mut aw = account.write();
         let token = aw.login(&descriptor.password);
 
-        if !aw.save() {
-            error!("Error when saving account {}", aw.email());
-        }
+        aw.save();
 
         return match token {
             Ok(t) => {
@@ -221,10 +208,7 @@ pub async fn logout_account(
             let mut aw = b.get(index).unwrap().write();
             match aw.logout(&ctx.token) {
                 Ok(_) => {
-                    if !aw.save() {
-                        error!("Error when saving account {}", aw.email());
-                    }
-
+                    aw.save();
                     info!("Account {} (id: {}) logged out", aw.email(), aw.id());
                     (StatusCode::OK, Json(json!({})))
                 }
@@ -269,7 +253,6 @@ pub async fn sign_out_account(
                 Json(json!({ "error": "account unverified" })),
             )
         }
-
         Account::Verified {
             attributes, tokens, ..
         } => {
@@ -346,9 +329,7 @@ pub async fn edit_account(
         }
     }
 
-    if !a.save() {
-        error!("Error when saving account {}", a.email());
-    }
+    a.save();
 
     (StatusCode::OK, Json(json!({})))
 }
@@ -422,9 +403,7 @@ pub async fn reset_password(
                             unreachable!()
                         };
 
-                        if !aw.save() {
-                            error!("Error when saving account {}", aw.email());
-                        }
+                        aw.save();
 
                         ret
                     } else {
@@ -459,7 +438,6 @@ pub mod manage {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
     use std::ops::{Deref, DerefMut};
-    use tracing::error;
 
     use sms3rs_shared::account::handle::manage::*;
 
@@ -528,9 +506,7 @@ pub mod manage {
             .index()
             .insert(account.id(), b.len());
 
-        if !account.save() {
-            error!("Error when saving account {}", account.email());
-        }
+        account.save();
 
         tracing::info!("Account {} (id: {}) built", account.email(), account.id());
         let id = account.id();
@@ -645,9 +621,7 @@ pub mod manage {
             }
         }
 
-        if !a.save() {
-            error!("Error when saving account {}", a.email());
-        }
+        a.save();
 
         (StatusCode::OK, Json(json!({})))
     }
