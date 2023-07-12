@@ -379,7 +379,6 @@ pub fn apply_edit_variant(
 }
 
 /// Initialize a reset password verification.
-#[axum_macros::debug_handler]
 pub async fn reset_password(
     Json(descriptor): Json<ResetPasswordDescriptor>,
 ) -> (StatusCode, Json<serde_json::Value>) {
@@ -451,306 +450,209 @@ pub mod manage {
     use crate::account::{self, AccountError, Permission};
     use crate::account::{Account, UserAttributes};
     use crate::RequirePermissionContext;
+    use axum::http::StatusCode;
+    use axum::Json;
     use chrono::Utc;
+    use parking_lot::RwLock;
+    use serde_json::json;
     use sha256::digest;
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
     use std::ops::{Deref, DerefMut};
+    use tracing::error;
 
     use sms3rs_shared::account::handle::manage::*;
 
     /// Let admin creating accounts.
-    pub async fn make_account(mut req: Request<()>) -> tide::Result {
-        let account_manager = &account::INSTANCE;
-        let context = match RequirePermissionContext::from_header(&req) {
-            Some(e) => e,
-            None => {
-                return Ok::<tide::Response, tide::Error>(
-                    json!({
-                        "status": "error",
-                        "error": "Permission denied",
-                    })
-                    .into(),
-                )
-            }
-        };
-        let descriptor: MakeAccountDescriptor = req.body_json().await?;
-        match context.valid(vec![Permission::ManageAccounts]).await {
-            Ok(able) => {
-                if !able {
-                    return Ok::<tide::Response, tide::Error>(
-                        json!({
-                            "status": "error",
-                            "error": "Permission denied",
-                        })
-                        .into(),
-                    );
-                }
-                let mut b = account_manager.inner().write().await;
-                let a = b
-                    .get(
-                        *account_manager
-                            .index()
-                            .read()
-                            .await
-                            .get(&context.account_id)
-                            .unwrap(),
-                    )
-                    .unwrap()
-                    .read()
-                    .await;
-                let account = Account::Verified {
-                    id: {
-                        let mut hasher = DefaultHasher::new();
-                        descriptor.email.hash(&mut hasher);
-                        hasher.finish()
-                    },
-                    attributes: UserAttributes {
-                        email: descriptor.email,
-                        name: descriptor.name,
-                        school_id: descriptor.school_id,
-                        phone: descriptor.phone,
-                        house: descriptor.house,
-                        organization: descriptor.organization,
-                        permissions: descriptor
-                            .permissions
-                            .iter()
-                            // Prevent permission overflowing
-                            .filter(|e| a.has_permission(**e))
-                            .copied()
-                            .collect(),
-                        registration_time: Utc::now(),
-                        registration_ip: req.remote().map(|e| e.to_string()),
-                        password_sha: digest(descriptor.password),
-                        token_expiration_time: 5,
-                    },
-                    tokens: Tokens::new(),
-                    verify: account::UserVerifyVariant::None,
-                };
-                drop(a);
-                if account_manager
-                    .index()
-                    .read()
-                    .await
-                    .contains_key(&account.id())
-                {
-                    return Ok::<tide::Response, tide::Error>(
-                        json!({
-                            "status": "error",
-                            "error": "Account already exist"
-                        })
-                        .into(),
-                    );
-                }
-                account_manager
-                    .index()
-                    .write()
-                    .await
-                    .insert(account.id(), b.len());
-                if !account.save().await {
-                    error!("Error when saving account {}", account.email());
-                }
-                info!("Account {} (id: {}) built", account.email(), account.id());
-                let id = account.id();
-                b.push(RwLock::new(account));
-                Ok::<tide::Response, tide::Error>(
-                    json!({
-                        "status": "success",
-                        "account_id": id,
-                    })
-                    .into(),
-                )
-            }
-            Err(err) => Ok::<tide::Response, tide::Error>(
-                json!({
-                    "status": "error",
-                    "error": err.to_string(),
-                })
-                .into(),
-            ),
+    pub async fn make_account(
+        ctx: RequirePermissionContext,
+        Json(descriptor): Json<MakeAccountDescriptor>,
+    ) -> (StatusCode, Json<serde_json::Value>) {
+        if !ctx.valid(vec![Permission::ManageAccounts]).unwrap() {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(json!({ "error": "permission denied" })),
+            );
         }
+
+        let mut b = crate::account::INSTANCE.inner().write();
+        let a = b
+            .get(
+                *crate::account::INSTANCE
+                    .index()
+                    .get(&ctx.account_id)
+                    .unwrap()
+                    .value(),
+            )
+            .unwrap()
+            .read();
+
+        let account = Account::Verified {
+            id: {
+                let mut hasher = DefaultHasher::new();
+                descriptor.email.hash(&mut hasher);
+                hasher.finish()
+            },
+            attributes: UserAttributes {
+                email: descriptor.email,
+                name: descriptor.name,
+                school_id: descriptor.school_id,
+                phone: descriptor.phone,
+                house: descriptor.house,
+                organization: descriptor.organization,
+                permissions: descriptor
+                    .permissions
+                    .iter()
+                    // prevent permission overflowing
+                    .filter(|e| a.has_permission(**e))
+                    .copied()
+                    .collect(),
+                registration_time: Utc::now(),
+                password_sha: digest(descriptor.password),
+                token_expiration_time: 5,
+            },
+            tokens: Tokens::new(),
+            verify: account::UserVerifyVariant::None,
+        };
+
+        drop(a);
+
+        if crate::account::INSTANCE.index().contains_key(&account.id()) {
+            return (
+                StatusCode::CONFLICT,
+                Json(json!({ "error": "account already exist" })),
+            );
+        }
+
+        crate::account::INSTANCE
+            .index()
+            .insert(account.id(), b.len());
+
+        if !account.save() {
+            error!("Error when saving account {}", account.email());
+        }
+
+        tracing::info!("Account {} (id: {}) built", account.email(), account.id());
+        let id = account.id();
+        b.push(RwLock::new(account));
+
+        (StatusCode::OK, Json(json!({ "account_id": id })))
     }
 
     /// View an account.
-    pub async fn view_account(mut req: Request<()>) -> tide::Result {
-        let account_manager = &account::INSTANCE;
-        let context = match RequirePermissionContext::from_header(&req) {
-            Some(e) => e,
-            None => {
-                return Ok::<tide::Response, tide::Error>(
-                    json!({
-                        "status": "error",
-                        "error": "Permission denied",
-                    })
-                    .into(),
-                )
-            }
-        };
-        let descriptor: ViewAccountDescriptor = req.body_json().await?;
-        match context.valid(vec![Permission::ViewAccounts]).await {
-            Ok(able) => {
-                if !able {
-                    return Ok::<tide::Response, tide::Error>(
-                        json!({
-                            "status": "error",
-                            "error": "Permission denied",
-                        })
-                        .into(),
-                    );
-                }
-                let ar = account_manager.inner().read().await;
-                let mut vec = Vec::new();
-                for aid in &descriptor.accounts {
-                    let a = ar
-                        .get(match account_manager.index().read().await.get(aid) {
-                            Some(e) => *e,
-                            None => {
-                                vec.push(ViewAccountResult::Err {
-                                    id: *aid,
-                                    error: "Target account not found".to_string(),
-                                });
-                                continue;
-                            }
-                        })
-                        .unwrap();
-                    let account = a.read().await;
-                    vec.push(match account.deref() {
-                        Account::Unverified(_) => ViewAccountResult::Err {
-                            id: *aid,
-                            error: "Target account is not verified".to_string(),
-                        },
-                        Account::Verified { attributes, .. } => {
-                            let permissions = account.permissions();
-                            if !context.valid(permissions.clone()).await.unwrap() {
-                                ViewAccountResult::Err {
-                                    id: account.id(),
-                                    error: "Permission denied".to_string(),
-                                }
-                            } else {
-                                ViewAccountResult::Ok(super::ViewAccountResult {
-                                    id: *aid,
-                                    metadata: account.metadata().unwrap(),
-                                    permissions,
-                                    registration_time: attributes.registration_time,
-                                    registration_ip: attributes.registration_ip.clone(),
-                                })
-                            }
-                        }
-                    })
-                }
-                Ok::<tide::Response, tide::Error>(
-                    json!({
-                        "status": "success",
-                        "results": vec,
-                    })
-                    .into(),
-                )
-            }
-            Err(err) => Ok::<tide::Response, tide::Error>(
-                json!({
-                    "status": "error",
-                    "error": err.to_string(),
-                })
-                .into(),
-            ),
+    pub async fn view_account(
+        ctx: RequirePermissionContext,
+        Json(descriptor): Json<ViewAccountDescriptor>,
+    ) -> (StatusCode, Json<serde_json::Value>) {
+        if !ctx.valid(vec![Permission::ViewAccounts]).unwrap() {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(json!({ "error": "permission denied" })),
+            );
         }
+
+        let ar = crate::account::INSTANCE.inner().read();
+        let mut vec = Vec::new();
+
+        for aid in &descriptor.accounts {
+            let a = ar
+                .get(match crate::account::INSTANCE.index().get(aid) {
+                    Some(e) => *e,
+                    None => {
+                        vec.push(ViewAccountResult::Err {
+                            id: *aid,
+                            error: "Target account not found".to_string(),
+                        });
+                        continue;
+                    }
+                })
+                .unwrap();
+
+            let account = a.read();
+
+            vec.push(
+                if let Account::Verified { attributes, .. } = account.deref() {
+                    let permissions = account.permissions();
+
+                    if !ctx.valid(permissions.clone()).unwrap() {
+                        ViewAccountResult::Err {
+                            id: account.id(),
+                            error: "Permission denied".to_string(),
+                        }
+                    } else {
+                        ViewAccountResult::Ok(super::ViewAccountResult {
+                            id: *aid,
+                            metadata: account.metadata().unwrap(),
+                            permissions,
+                            registration_time: attributes.registration_time,
+                        })
+                    }
+                } else {
+                    ViewAccountResult::Err {
+                        id: *aid,
+                        error: "Target account is not verified".to_string(),
+                    }
+                },
+            )
+        }
+
+        (
+            StatusCode::OK,
+            Json(json!({ "results": serde_json::to_value(vec).unwrap_or_default() })),
+        )
     }
 
     /// Modify an account from admin side.
-    pub async fn modify_account(mut req: Request<()>) -> tide::Result {
-        let account_manager = &account::INSTANCE;
-        let context = match RequirePermissionContext::from_header(&req) {
-            Some(e) => e,
-            None => {
-                return Ok::<tide::Response, tide::Error>(
-                    json!({
-                        "status": "error",
-                        "error": "Permission denied",
-                    })
-                    .into(),
-                )
-            }
-        };
-        let descriptor: AccountModifyDescriptor = req.body_json().await?;
-        match context.valid(vec![Permission::ManageAccounts]).await {
-            Ok(able) => {
-                if !able {
-                    return Ok::<tide::Response, tide::Error>(
-                        json!({
-                            "status": "error",
-                            "error": "Permission denied",
-                        })
-                        .into(),
-                    );
-                }
-                let ar = account_manager.inner().read().await;
-                let mut a = ar
-                    .get(
-                        match account_manager
-                            .index()
-                            .read()
-                            .await
-                            .get(&descriptor.account_id)
-                        {
-                            Some(e) => *e,
-                            None => {
-                                return Ok::<tide::Response, tide::Error>(
-                                    json!({
-                                        "status": "error",
-                                        "error": "Target account not found",
-                                    })
-                                    .into(),
-                                )
-                            }
-                        },
-                    )
-                    .unwrap()
-                    .write()
-                    .await;
-                if !context.valid(a.permissions()).await.unwrap_or_default() {
-                    return Ok::<tide::Response, tide::Error>(
-                        json!({
-                            "status": "error",
-                            "error": "Permission denied",
-                        })
-                        .into(),
-                    );
-                }
-                for variant in descriptor.variants {
-                    match apply_account_modify_variant(variant, a.deref_mut(), &context).await {
-                        Ok(_) => continue,
-                        Err(err) => {
-                            return Ok::<tide::Response, tide::Error>(
-                                json!({
-                                    "status": "error",
-                                    "error": err.to_string(),
-                                })
-                                .into(),
-                            );
-                        }
-                    }
-                }
-                if !a.save().await {
-                    error!("Error when saving account {}", a.email());
-                }
-                Ok::<tide::Response, tide::Error>(
-                    json!({
-                        "status": "success",
-                    })
-                    .into(),
-                )
-            }
-            Err(err) => Ok::<tide::Response, tide::Error>(
-                json!({
-                    "status": "error",
-                    "error": err.to_string(),
-                })
-                .into(),
-            ),
+    pub async fn modify_account(
+        ctx: RequirePermissionContext,
+        Json(descriptor): Json<AccountModifyDescriptor>,
+    ) -> (StatusCode, Json<serde_json::Value>) {
+        if ctx.valid(vec![Permission::ManageAccounts]).unwrap() {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(json!({ "error": "permission denied" })),
+            );
         }
+
+        let ar = crate::account::INSTANCE.inner().read();
+        let mut a = ar
+            .get(
+                if let Some(e) = crate::account::INSTANCE.index().get(&descriptor.account_id) {
+                    *e.value()
+                } else {
+                    return (
+                        StatusCode::NOT_FOUND,
+                        Json(json!({ "error": "target account not found" })),
+                    );
+                },
+            )
+            .unwrap()
+            .write();
+
+        if !ctx.valid(a.permissions()).unwrap() {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(json!({ "error": "permission denied" })),
+            );
+        }
+
+        for variant in descriptor.variants {
+            if let Err(err) = apply_account_modify_variant(variant, a.deref_mut(), &ctx) {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(json!({ "error": err.to_string() })),
+                );
+            }
+        }
+
+        if !a.save() {
+            error!("Error when saving account {}", a.email());
+        }
+
+        (StatusCode::OK, Json(json!({})))
     }
 
-    async fn apply_account_modify_variant(
+    fn apply_account_modify_variant(
         mt: AccountModifyVariant,
         account: &mut Account,
         context: &RequirePermissionContext,
@@ -765,19 +667,17 @@ pub mod manage {
                 AccountModifyVariant::Organization(org) => attributes.organization = org,
                 AccountModifyVariant::Email(email) => attributes.email = email,
                 AccountModifyVariant::Permission(permissions) => {
-                    let am = crate::account::INSTANCE.inner().read().await;
+                    let am = crate::account::INSTANCE.inner().read();
                     let a = am
                         .get(
                             *crate::account::INSTANCE
                                 .index()
-                                .read()
-                                .await
                                 .get(&context.account_id)
-                                .unwrap(),
+                                .unwrap()
+                                .value(),
                         )
                         .unwrap()
-                        .read()
-                        .await;
+                        .read();
                     attributes.permissions = a
                         .permissions()
                         .into_iter()
@@ -786,6 +686,7 @@ pub mod manage {
                 }
             },
         }
+
         Ok(())
     }
 }

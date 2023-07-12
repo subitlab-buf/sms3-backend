@@ -17,14 +17,6 @@ async fn main() {
     // use an external function here so this won't be in a proc macro for betting coding experience
     run().await.unwrap();
 
-    // Account managing
-    app.at("/api/account/manage/create")
-        .post(account::handle::manage::make_account);
-    app.at("/api/account/manage/view")
-        .post(account::handle::manage::view_account);
-    app.at("/api/account/manage/modify")
-        .post(account::handle::manage::modify_account);
-
     // Posting
     app.at("/api/post/upload-image")
         .post(post::handle::cache_image);
@@ -55,6 +47,18 @@ async fn run() -> anyhow::Result<()> {
         .route(
             "/api/account/reset-password",
             post(account::handle::reset_password),
+        )
+        .route(
+            "/api/account/manage/create",
+            post(account::handle::manage::make_account),
+        )
+        .route(
+            "/api/account/manage/view",
+            post(account::handle::manage::view_account),
+        )
+        .route(
+            "/api/account/manage/modify",
+            post(account::handle::manage::modify_account),
         );
 
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], 8080));
