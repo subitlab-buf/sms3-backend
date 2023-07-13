@@ -15,6 +15,6 @@
 
 ### Server
 
-The server use the [`tide`](https://docs.rs/tide/latest/tide/) web framework which uses [`async-std`](https://async.rs/) async runtime / async implementation of rust std.
+The server use the [`axum`](https://docs.rs/axum/latest/axum/) web framework which uses [`tokio`](https://tokio.rs/).
 
 Append docs to code if possible.
