@@ -583,7 +583,7 @@ pub mod manage {
         ctx: RequirePermissionContext,
         Json(descriptor): Json<AccountModifyDescriptor>,
     ) -> (StatusCode, Json<serde_json::Value>) {
-        if ctx.valid(vec![Permission::ManageAccounts]).unwrap() {
+        if !ctx.valid(vec![Permission::ManageAccounts]).unwrap() {
             return (
                 StatusCode::FORBIDDEN,
                 Json(json!({ "error": "permission denied" })),

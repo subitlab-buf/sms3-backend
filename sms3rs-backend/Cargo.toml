@@ -28,7 +28,10 @@ anyhow = "*"
 parking_lot = "*"
 hashbrown = "*"
 dashmap = "*"
+mime = "*"
 
 [dev-dependencies]
 serial_test = "*"
 axum-macros = "*"
+tower = { version = "0.4", features = ["util"] }
+hyper = { version = "0.14", features = ["full"] }

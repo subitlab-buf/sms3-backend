@@ -31,21 +31,20 @@ impl Context {
             self.email, self.code
         );
 
-        let this = self.clone();
+        #[cfg(not(test))]
+        {
+            let this = self.clone();
 
-        tokio::spawn(async move {
-            #[cfg(not(test))]
-            {
+            tokio::spawn(async move {
                 SENDER_INSTANCE.send_verification(&this).await.unwrap();
-            }
+                info!("Verification code for {} sent", this.email);
+            });
+        }
 
-            #[cfg(test)]
-            {
-                VERIFICATION_CODE.store(this.code, std::sync::atomic::Ordering::Relaxed);
-            }
-
-            info!("Verification code for {} sent", this.email);
-        });
+        #[cfg(test)]
+        {
+            VERIFICATION_CODE.store(self.code, std::sync::atomic::Ordering::Relaxed);
+        }
     }
 
     /// Whether this context was expired.

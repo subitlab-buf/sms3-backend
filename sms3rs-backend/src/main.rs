@@ -15,12 +15,21 @@ async fn main() {
     account::INSTANCE.refresh_all();
 
     // use an external function here so this won't be in a proc macros
-    // for betting coding experience
-    run().await.unwrap();
+    // for betting coding experience, also for tests
+    let app = router();
+
+    // socket in 127.0.0.1:8080
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], 8080));
+
+    axum::Server::bind(&addr)
+        .serve(app.into_make_service())
+        .await
+        .unwrap();
 }
 
-async fn run() -> anyhow::Result<()> {
-    let app = axum::Router::new()
+/// Construct a router.
+fn router() -> axum::Router {
+    axum::Router::new()
         // account
         .route("/api/account/create", post(account::handle::create_account))
         .route("/api/account/verify", post(account::handle::verify_account))
@@ -49,22 +58,14 @@ async fn run() -> anyhow::Result<()> {
             "/api/account/manage/modify",
             post(account::handle::manage::modify_account),
         )
+        // posting
         .route("/api/post/upload-image", post(post::handle::cache_image))
         .route("/api/post/get-image", post(post::handle::get_image))
         .route("/api/post/create", post(post::handle::new_post))
         .route("/api/post/get", post(post::handle::get_posts))
         .route("/api/post/edit", post(post::handle::edit_post))
         .route("/api/post/get-info", post(post::handle::get_posts_info))
-        .route("/api/post/approve", post(post::handle::approve_post));
-
-    // socket in 127.0.0.1:8080
-    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], 8080));
-
-    axum::Server::bind(&addr)
-        .serve(app.into_make_service())
-        .await?;
-
-    Ok(())
+        .route("/api/post/approve", post(post::handle::approve_post))
 }
 
 /// A context for checking the validation of action an account
