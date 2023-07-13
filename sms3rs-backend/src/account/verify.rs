@@ -1,11 +1,11 @@
-use super::AccountError;
 use chrono::{Days, NaiveDateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha256::digest;
-use tide::log::info;
 
 #[cfg(not(test))]
 use once_cell::sync::Lazy;
+
+use tracing::info;
 
 #[cfg(not(test))]
 pub(super) static SENDER_INSTANCE: Lazy<VerificationSender> = Lazy::new(VerificationSender::new);
@@ -14,7 +14,7 @@ pub(super) static SENDER_INSTANCE: Lazy<VerificationSender> = Lazy::new(Verifica
 pub static VERIFICATION_CODE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 /// Represent infos of an unverified object.
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Context {
     /// The email address.
     pub email: lettre::Address,
@@ -25,7 +25,7 @@ pub struct Context {
 }
 
 impl Context {
-    pub async fn send_verify(&self) -> Result<(), AccountError> {
+    pub fn send_verify(&self) {
         info!(
             "Sending verification code for {} (code: {})",
             self.email, self.code
@@ -33,19 +33,18 @@ impl Context {
 
         #[cfg(not(test))]
         {
-            SENDER_INSTANCE
-                .send_verification(self)
-                .await
-                .map_err(|err| AccountError::MailSendError(err.to_string()))?;
+            let this = self.clone();
+
+            tokio::spawn(async move {
+                SENDER_INSTANCE.send_verification(&this).await.unwrap();
+                info!("Verification code for {} sent", this.email);
+            });
         }
 
         #[cfg(test)]
         {
             VERIFICATION_CODE.store(self.code, std::sync::atomic::Ordering::Relaxed);
         }
-
-        info!("Verification code for {} sent", self.email);
-        Ok(())
     }
 
     /// Whether this context was expired.
@@ -126,12 +125,12 @@ impl VerificationSender {
         }
     }
 
-    fn mailer(&self) -> lettre::AsyncSmtpTransport<lettre::AsyncStd1Executor> {
+    fn mailer(&self) -> lettre::AsyncSmtpTransport<lettre::Tokio1Executor> {
         use lettre::{
-            transport::smtp::authentication::Credentials, AsyncSmtpTransport, AsyncStd1Executor,
+            transport::smtp::authentication::Credentials, AsyncSmtpTransport, Tokio1Executor,
         };
 
-        AsyncSmtpTransport::<AsyncStd1Executor>::relay(&self.config.server)
+        AsyncSmtpTransport::<Tokio1Executor>::relay(&self.config.server)
             .unwrap()
             .port(self.config.port)
             .credentials(Credentials::new(

@@ -7,57 +7,69 @@ mod post;
 mod tests;
 
 use account::{AccountManagerError, Permissions};
+use axum::{async_trait, http::StatusCode, routing::post};
 use std::ops::Deref;
-use tide::Request;
 
-#[async_std::main]
-async fn main() -> tide::Result<()> {
-    let mut app = tide::new();
-    tide::log::with_level(tide::log::LevelFilter::Debug);
-    account::INSTANCE.refresh_all().await;
+#[tokio::main]
+async fn main() {
+    account::INSTANCE.refresh_all();
 
-    // Basic account controlling
-    app.at("/api/account/create")
-        .post(account::handle::create_account);
-    app.at("/api/account/verify")
-        .post(account::handle::verify_account);
-    app.at("/api/account/login")
-        .post(account::handle::login_account);
-    app.at("/api/account/logout")
-        .post(account::handle::logout_account);
-    app.at("/api/account/signout")
-        .post(account::handle::sign_out_account);
-    app.at("/api/account/view")
-        .get(account::handle::view_account);
-    app.at("/api/account/edit")
-        .post(account::handle::edit_account);
-    app.at("/api/account/reset-password")
-        .post(account::handle::reset_password);
+    // use an external function here so this won't be in a proc macros
+    // for betting coding experience, also for tests
+    let app = router();
 
-    // Account managing
-    app.at("/api/account/manage/create")
-        .post(account::handle::manage::make_account);
-    app.at("/api/account/manage/view")
-        .post(account::handle::manage::view_account);
-    app.at("/api/account/manage/modify")
-        .post(account::handle::manage::modify_account);
+    // socket in 127.0.0.1:8080
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], 8080));
 
-    // Posting
-    app.at("/api/post/upload-image")
-        .post(post::handle::cache_image);
-    app.at("/api/post/get-image").post(post::handle::get_image);
-    app.at("/api/post/create").post(post::handle::new_post);
-    app.at("/api/post/get").post(post::handle::get_posts);
-    app.at("/api/post/edit").post(post::handle::edit_post);
-    app.at("/api/post/get-info")
-        .post(post::handle::get_posts_info);
-    app.at("/api/post/approve").post(post::handle::approve_post);
-
-    app.listen("127.0.0.1:8080").await?;
-    Ok(())
+    axum::Server::bind(&addr)
+        .serve(app.into_make_service())
+        .await
+        .unwrap();
 }
 
-/// A context for checking the validation of action an account performs with permission requirements.
+/// Construct a router.
+fn router() -> axum::Router {
+    axum::Router::new()
+        // account
+        .route("/api/account/create", post(account::handle::create_account))
+        .route("/api/account/verify", post(account::handle::verify_account))
+        .route("/api/account/login", post(account::handle::login_account))
+        .route("/api/account/logout", post(account::handle::logout_account))
+        .route(
+            "/api/account/signout",
+            post(account::handle::sign_out_account),
+        )
+        .route("/api/account/view", post(account::handle::view_account))
+        .route("/api/account/edit", post(account::handle::edit_account))
+        .route(
+            "/api/account/reset-password",
+            post(account::handle::reset_password),
+        )
+        // account management
+        .route(
+            "/api/account/manage/create",
+            post(account::handle::manage::make_account),
+        )
+        .route(
+            "/api/account/manage/view",
+            post(account::handle::manage::view_account),
+        )
+        .route(
+            "/api/account/manage/modify",
+            post(account::handle::manage::modify_account),
+        )
+        // posting
+        .route("/api/post/upload-image", post(post::handle::cache_image))
+        .route("/api/post/get-image", post(post::handle::get_image))
+        .route("/api/post/create", post(post::handle::new_post))
+        .route("/api/post/get", post(post::handle::get_posts))
+        .route("/api/post/edit", post(post::handle::edit_post))
+        .route("/api/post/get-info", post(post::handle::get_posts_info))
+        .route("/api/post/approve", post(post::handle::approve_post))
+}
+
+/// A context for checking the validation of action an account
+/// performs with permission requirements.
 pub struct RequirePermissionContext {
     /// The access token of this account.
     pub token: String,
@@ -67,19 +79,16 @@ pub struct RequirePermissionContext {
 
 impl RequirePermissionContext {
     /// Indicates whether this context's token and permissions is valid.
-    pub async fn valid(&self, permissions: Permissions) -> Result<bool, AccountManagerError> {
-        let account_manager = account::INSTANCE.deref();
-        match account_manager
+    pub fn valid(&self, permissions: Permissions) -> Result<bool, AccountManagerError> {
+        match account::INSTANCE
             .index()
-            .read()
-            .await
             .get(&self.account_id)
-            .copied()
+            .map(|e| *e.value())
         {
             Some(index) => {
-                account_manager.refresh(self.account_id).await;
-                let b = account_manager.inner().read().await;
-                let account = b.get(index).unwrap().read().await;
+                account::INSTANCE.refresh(self.account_id);
+                let b = account::INSTANCE.inner().read();
+                let account = b.get(index).unwrap().read();
                 Ok(match account.deref() {
                     account::Account::Unverified(_) => {
                         return Err(AccountManagerError::Account(
@@ -93,20 +102,52 @@ impl RequirePermissionContext {
             None => Err(AccountManagerError::AccountNotFound(self.account_id)),
         }
     }
+}
 
-    pub fn from_header(request: &Request<()>) -> Option<Self> {
-        Some(Self {
-            token: match request.header("Token") {
-                Some(e) => e.as_str().to_string(),
-                None => return None,
+#[async_trait]
+impl<S> axum::extract::FromRequestParts<S> for RequirePermissionContext {
+    type Rejection = (StatusCode, axum::Json<serde_json::Value>);
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        _: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let this = Self {
+            token: if let Some(value) = parts.headers.get("Token") {
+                value.to_str().unwrap_or_default().to_string()
+            } else {
+                return Err((
+                    StatusCode::UNAUTHORIZED,
+                    axum::Json(
+                        serde_json::json!({ "error": "no valid token field found in headers"}),
+                    ),
+                ));
             },
-            account_id: match request.header("AccountId") {
-                Some(e) => match e.as_str().parse() {
-                    Ok(n) => n,
-                    Err(_) => return None,
-                },
-                None => return None,
+
+            account_id: if let Some(value) = parts.headers.get("AccountId") {
+                value
+                    .to_str()
+                    .unwrap_or_default()
+                    .to_string()
+                    .parse()
+                    .unwrap_or_default()
+            } else {
+                return Err((
+                    StatusCode::UNAUTHORIZED,
+                    axum::Json(
+                        serde_json::json!({ "error": "no valid account id field found in headers"}),
+                    ),
+                ));
             },
-        })
+        };
+
+        if !this.valid(vec![]).unwrap_or_default() {
+            return Err((
+                StatusCode::FORBIDDEN,
+                axum::Json(serde_json::json!({ "error": "permission denied" })),
+            ));
+        }
+
+        Ok(this)
     }
 }

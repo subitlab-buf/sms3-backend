@@ -38,7 +38,7 @@ pub enum Permission {
     Check,
     ManageAccounts,
     /// The top permission, no actual usage.
-    OP,
+    Op,
     /// Post posters for approval.
     Post,
     /// View approved and currently active posters.

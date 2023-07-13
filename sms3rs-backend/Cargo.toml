@@ -4,12 +4,13 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-tide = "0.16"
-async-std = { version = "1.12", features = ["attributes"] }
+tokio = { version = "*", features = ["full"] }
+axum = { version = "0.6", features = ["tracing"] }
+tracing = "*"
 serde = { version = "1.0", features = ["derive"] }
 lettre = { version = "0.10", default-features = false, features = [
   "serde",
-  "async-std1-rustls-tls",
+  "tokio1-rustls-tls",
   "smtp-transport",
   "pool",
   "hostname",
@@ -23,8 +24,14 @@ toml = "0.7"
 sha256 = "*"
 image = "0.24"
 sms3rs-shared = { version = "*", path = "../sms3rs-shared" }
+anyhow = "*"
+parking_lot = "*"
+hashbrown = "*"
+dashmap = "*"
+mime = "*"
 
 [dev-dependencies]
-tide-testing = "0.1"
 serial_test = "*"
-
+axum-macros = "*"
+tower = { version = "0.4", features = ["util"] }
+hyper = { version = "0.14", features = ["full"] }
