@@ -48,7 +48,6 @@ pub struct ViewAccountResult {
     pub metadata: super::UserMetadata,
     pub permissions: super::Permissions,
     pub registration_time: chrono::DateTime<chrono::Utc>,
-    pub registration_ip: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]

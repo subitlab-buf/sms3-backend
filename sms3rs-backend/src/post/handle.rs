@@ -5,364 +5,243 @@ use crate::account::Account;
 use crate::account::Permission;
 use crate::post::cache::PostImageCache;
 use crate::RequirePermissionContext;
+use axum::body::Bytes;
+use axum::http::StatusCode;
+use axum::Json;
 use chrono::Days;
 use chrono::Utc;
+use serde_json::json;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::VecDeque;
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::ops::Deref;
 use std::sync::atomic;
-use tide::log::error;
-use tide::prelude::*;
-use tide::Request;
-use tide::StatusCode;
 
 use sms3rs_shared::post::handle::*;
 
 /// Read and store a cache image with cache id returned.
-pub async fn cache_image(mut req: Request<()>) -> tide::Result {
-    let cxt = match RequirePermissionContext::from_header(&req) {
-        Some(e) => e,
-        None => {
-            return Ok::<tide::Response, tide::Error>(
-                json!({
-                    "status": "error",
-                    "error": "Permission denied",
-                })
-                .into(),
-            )
-        }
-    };
-    match cxt.valid(vec![Permission::Post]).await {
-        Ok(able) => {
-            if able {
-                let id;
-                super::cache::INSTANCE
-                    .push(
-                        match PostImageCache::new(
-                            &{
-                                let bs = req.body_bytes().await?;
-                                if bs.len() > 50_000_000 {
-                                    return Ok::<tide::Response, tide::Error>(
-                                        json!({
-                                            "status": "error",
-                                            "error": format!("Image too big"),
-                                        })
-                                        .into(),
-                                    );
-                                }
-                                bs
-                            },
-                            cxt.account_id,
-                        ) {
-                            Ok(e) => {
-                                id = e.1;
-                                e.0
-                            }
-                            Err(err) => {
-                                return Ok::<tide::Response, tide::Error>(
-                                    json!({
-                                        "status": "error",
-                                        "error": format!("Image cache create failed: {}", err),
-                                    })
-                                    .into(),
-                                )
-                            }
-                        },
-                    )
-                    .await;
-                Ok::<tide::Response, tide::Error>(
-                    json!({
-                        "status": "success",
-                        "hash": id,
-                    })
-                    .into(),
-                )
-            } else {
-                Ok::<tide::Response, tide::Error>(
-                    json!({
-                        "status": "error",
-                        "error": "Permission denied",
-                    })
-                    .into(),
-                )
-            }
-        }
-        Err(err) => Ok::<tide::Response, tide::Error>(
-            json!({
-                "status": "error",
-                "error": err.to_string(),
-            })
-            .into(),
-        ),
+pub async fn cache_image(
+    (ctx, bytes): (RequirePermissionContext, Bytes),
+) -> (StatusCode, Json<serde_json::Value>) {
+    if ctx.valid(vec![Permission::Post]).unwrap() {
+        let id;
+
+        super::cache::INSTANCE.push(
+            match PostImageCache::new(
+                &{
+                    if bytes.len() > 50_000_000 {
+                        return (
+                            StatusCode::PAYLOAD_TOO_LARGE,
+                            Json(json!({ "error": "image too big" })),
+                        );
+                    }
+
+                    bytes.to_vec()
+                },
+                ctx.account_id,
+            ) {
+                Ok(e) => {
+                    id = e.1;
+                    e.0
+                }
+
+                Err(err) => {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({ "error": err.to_string() })),
+                    );
+                }
+            },
+        );
+
+        (StatusCode::OK, Json(json!({ "hash": id })))
+    } else {
+        (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "permission denied" })),
+        )
     }
 }
 
 /// Get image png bytes from target image cache hash.
-pub async fn get_image(mut req: Request<()>) -> tide::Result {
-    let cxt = match RequirePermissionContext::from_header(&req) {
-        Some(e) => e,
-        None => {
-            return Ok::<tide::Response, tide::Error>(
-                json!({
-                    "status": "error",
-                    "error": "Permission denied",
-                })
-                .into(),
-            )
-        }
-    };
-    let descriptor: GetImageDescriptor = req.body_json().await?;
-    match cxt.valid(vec![Permission::View]).await {
-        Ok(able) => {
-            if able {
-                for img in super::cache::INSTANCE.caches.read().await.iter() {
-                    if img.hash == descriptor.hash {
-                        return Ok::<tide::Response, tide::Error>({
-                            #[allow(unused_mut)]
-                            let mut rep = tide::Response::new(StatusCode::Ok);
+pub async fn get_image(
+    ctx: RequirePermissionContext,
+    Json(descriptor): Json<GetImageDescriptor>,
+) -> (StatusCode, Vec<u8>) {
+    if ctx.valid(vec![Permission::View]).unwrap() {
+        if let Some(img) = super::cache::INSTANCE
+            .caches
+            .read()
+            .iter()
+            .find(|e| e.hash == descriptor.hash)
+        {
+            #[cfg(not(test))]
+            {
+                use std::io::Read;
 
-                            #[cfg(not(test))]
-                            {
-                                use async_std::io::BufReader;
-                                use tide::Body;
-                                rep.set_body(Body::from_reader(
-                                    match async_std::fs::File::open(format!(
-                                        "./data/images/{}.png",
-                                        img.hash
-                                    ))
-                                    .await
-                                    {
-                                        Ok(e) => BufReader::new(e),
-                                        Err(_) => {
-                                            return Ok::<tide::Response, tide::Error>(
-                                                tide::Response::new(StatusCode::NoContent),
-                                            )
-                                        }
-                                    },
-                                    None,
-                                ));
-                            }
-
-                            rep
-                        });
-                    }
+                if let Ok(mut file) = std::fs::File::open(format!("./data/images/{}.png", img.hash))
+                {
+                    let mut vec = Vec::new();
+                    let _ = file.read_to_end(&mut vec);
+                    return (StatusCode::OK, vec);
+                } else {
+                    return (StatusCode::NOT_FOUND, Vec::new());
                 }
-                Ok::<tide::Response, tide::Error>(tide::Response::new(StatusCode::NoContent))
-            } else {
-                Ok::<tide::Response, tide::Error>(tide::Response::new(StatusCode::NoContent))
+            }
+
+            #[cfg(test)]
+            {
+                unreachable!("test not covered");
             }
         }
-        Err(err) => Ok::<tide::Response, tide::Error>(
-            json!({
-                "status": "error",
-                "error": err.to_string(),
-            })
-            .into(),
-        ),
+
+        (StatusCode::NOT_FOUND, Vec::new())
+    } else {
+        (StatusCode::FORBIDDEN, Vec::new())
     }
 }
 
-pub async fn new_post(mut req: Request<()>) -> tide::Result {
-    let cxt = match RequirePermissionContext::from_header(&req) {
-        Some(e) => e,
-        None => {
-            return Ok::<tide::Response, tide::Error>(
-                json!({
-                    "status": "error",
-                    "error": "Permission denied",
-                })
-                .into(),
-            )
+pub async fn new_post(
+    ctx: RequirePermissionContext,
+    Json(descriptor): Json<PostDescriptor>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    if ctx.valid(vec![Permission::Post]).unwrap() {
+        let cache = super::cache::INSTANCE.caches.read();
+
+        if descriptor
+            .images
+            .iter()
+            .any(|img_id| !cache.iter().any(|e| e.hash == *img_id))
+        {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "target image not found"})),
+            );
         }
-    };
-    let descriptor: PostDescriptor = req.body_json().await?;
-    match cxt.valid(vec![Permission::Post]).await {
-        Ok(able) => {
-            if able {
-                let cache = super::cache::INSTANCE.caches.read().await;
-                for img_id in descriptor.images.iter() {
-                    if !cache.iter().any(|e| e.hash == *img_id) {
-                        return Ok::<tide::Response, tide::Error>(
-                            json!({
-                                "status": "error",
-                                "error": format!("Target image cache {} not fount", img_id),
-                            })
-                            .into(),
+
+        descriptor.images.iter().for_each(|img_id| {
+            cache
+                .iter()
+                .find(|e| e.hash == *img_id)
+                .unwrap()
+                .blocked
+                .store(true, atomic::Ordering::Relaxed)
+        });
+
+        let post = Post {
+            id: {
+                let mut hasher = DefaultHasher::new();
+
+                descriptor.title.hash(&mut hasher);
+                descriptor.description.hash(&mut hasher);
+                descriptor.images.hash(&mut hasher);
+
+                let id = hasher.finish();
+
+                if super::INSTANCE.contains_id(id) {
+                    return (
+                        StatusCode::CONFLICT,
+                        Json(json!({ "error": "post id conflicted" })),
+                    );
+                }
+
+                id
+            },
+
+            images: descriptor.images,
+
+            status: {
+                let mut deque = VecDeque::new();
+                deque.push_back(super::PostAcceptationData {
+                    operator: ctx.account_id,
+                    status: super::PostAcceptationStatus::Pending,
+                    time: Utc::now(),
+                });
+                deque
+            },
+
+            metadata: super::PostMetadata {
+                title: descriptor.title,
+                description: descriptor.description,
+
+                time_range: {
+                    if descriptor.time_range.0 + Days::new(7) < descriptor.time_range.1 {
+                        return (
+                            StatusCode::FORBIDDEN,
+                            Json(json!({ "error": "post time out of range" })),
                         );
                     }
-                }
-                for img_id in descriptor.images.iter() {
-                    cache
-                        .iter()
-                        .find(|e| e.hash == *img_id)
-                        .unwrap()
-                        .blocked
-                        .store(true, atomic::Ordering::Relaxed)
-                }
-                let post = Post {
-                    id: {
-                        let mut hasher = DefaultHasher::new();
-                        descriptor.title.hash(&mut hasher);
-                        descriptor.description.hash(&mut hasher);
-                        descriptor.images.hash(&mut hasher);
-                        let id = hasher.finish();
-                        if super::INSTANCE.contains_id(id).await {
-                            return Ok::<tide::Response, tide::Error>(
-                                json!({
-                                    "status": "error",
-                                    "error": "Post id repeated",
-                                })
-                                .into(),
-                            );
-                        }
-                        id
-                    },
-                    images: descriptor.images,
-                    status: {
-                        let mut deque = VecDeque::new();
-                        deque.push_back(super::PostAcceptationData {
-                            operator: cxt.account_id,
-                            status: super::PostAcceptationStatus::Pending,
-                            time: Utc::now(),
-                        });
-                        deque
-                    },
-                    metadata: super::PostMetadata {
-                        title: descriptor.title,
-                        description: descriptor.description,
-                        time_range: {
-                            if descriptor
-                                .time_range
-                                .0
-                                .checked_add_days(Days::new(7))
-                                .map_or(false, |e| e < descriptor.time_range.1)
-                            {
-                                return Ok::<tide::Response, tide::Error>(
-                                    json!({
-                                        "status": "error",
-                                        "error": "Post time out of range",
-                                    })
-                                    .into(),
-                                );
-                            }
-                            descriptor.time_range
-                        },
-                    },
-                    publisher: cxt.account_id,
-                };
-                if !super::save_post(&post).await {
-                    error!("Error while saving post {}", post.id);
-                }
-                let id = post.id;
-                super::INSTANCE.push(post).await;
-                Ok::<tide::Response, tide::Error>(
-                    json!({
-                        "status": "success",
-                        "post_id": id,
-                    })
-                    .into(),
-                )
-            } else {
-                Ok::<tide::Response, tide::Error>(
-                    json!({
-                        "status": "error",
-                        "error": "Permission denied",
-                    })
-                    .into(),
-                )
-            }
-        }
-        Err(err) => Ok::<tide::Response, tide::Error>(
-            json!({
-                "status": "error",
-                "error": err.to_string(),
-            })
-            .into(),
-        ),
+
+                    descriptor.time_range
+                },
+            },
+
+            publisher: ctx.account_id,
+        };
+
+        super::save_post(&post);
+
+        let id = post.id;
+        super::INSTANCE.push(post);
+
+        (StatusCode::OK, Json(json!({ "post_id": id })))
+    } else {
+        (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "permission denied" })),
+        )
     }
 }
 
-pub async fn get_posts(mut req: Request<()>) -> tide::Result {
-    let cxt = match RequirePermissionContext::from_header(&req) {
-        Some(e) => e,
-        None => {
-            return Ok::<tide::Response, tide::Error>(
-                json!({
-                    "status": "error",
-                    "error": "Permission denied",
-                })
-                .into(),
-            )
-        }
-    };
-    let descriptor: GetPostsDescriptor = req.body_json().await?;
-    match cxt.valid(vec![Permission::View]).await {
-        Ok(able) => {
-            if able {
-                let am = account::INSTANCE.inner().read().await;
-                let ar = am
-                    .get(
-                        *account::INSTANCE
-                            .index()
-                            .read()
-                            .await
-                            .get(&cxt.account_id)
-                            .unwrap(),
-                    )
-                    .unwrap()
-                    .read()
-                    .await;
-                let mut posts = Vec::new();
-                for p in super::INSTANCE.posts.read().await.iter() {
-                    let pr = p.read().await;
-                    if descriptor
-                        .filters
-                        .iter()
-                        .all(|f| matches_get_post_filter(f, pr.deref(), ar.deref()))
-                    {
-                        posts.push(pr.id);
-                    }
-                }
-                Ok::<tide::Response, tide::Error>(
-                    json!({
-                        "status": "success",
-                        "posts": posts,
-                    })
-                    .into(),
-                )
-            } else {
-                Ok::<tide::Response, tide::Error>(
-                    json!({
-                        "status": "error",
-                        "error": "Permission denied",
-                    })
-                    .into(),
-                )
+pub async fn get_posts(
+    ctx: RequirePermissionContext,
+    Json(descriptor): Json<GetPostsDescriptor>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    if ctx.valid(vec![Permission::View]).unwrap() {
+        let am = account::INSTANCE.inner().read();
+        let ar = am
+            .get(*account::INSTANCE.index().get(&ctx.account_id).unwrap())
+            .unwrap()
+            .read();
+
+        let mut posts = Vec::new();
+
+        super::INSTANCE.posts.read().iter().for_each(|p| {
+            let pr = p.read();
+
+            if descriptor
+                .filters
+                .iter()
+                .all(|f| matches_get_post_filter(f, pr.deref(), ar.deref()))
+            {
+                posts.push(pr.id);
             }
-        }
-        Err(err) => Ok::<tide::Response, tide::Error>(
-            json!({
-                "status": "error",
-                "error": err.to_string(),
-            })
-            .into(),
-        ),
+        });
+
+        (StatusCode::OK, Json(json!({ "posts": posts })))
+    } else {
+        (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "permission denied" })),
+        )
     }
 }
 
 /// If the target post matches this filter and the target account has enough permission to get the post.
 fn matches_get_post_filter(filter: &GetPostsFilter, post: &Post, user: &Account) -> bool {
     let date = Utc::now().date_naive();
+
     (match filter {
         GetPostsFilter::Acceptation(status) => post
             .status
             .back()
             .map_or(false, |s| status.matches(&s.status)),
+
         GetPostsFilter::Account(account) => &post.publisher == account,
         GetPostsFilter::Before(d) => &post.metadata.time_range.0 <= d,
         GetPostsFilter::After(d) => &post.metadata.time_range.0 >= d,
+
         GetPostsFilter::Keyword(keywords) => {
             let ks = keywords.split_whitespace();
             ks.into_iter()
@@ -373,121 +252,83 @@ fn matches_get_post_filter(filter: &GetPostsFilter, post: &Post, user: &Account)
         || user.has_permission(Permission::Check))
 }
 
-pub async fn edit_post(mut req: Request<()>) -> tide::Result {
-    let cxt = match RequirePermissionContext::from_header(&req) {
-        Some(e) => e,
-        None => {
-            return Ok::<tide::Response, tide::Error>(
-                json!({
-                    "status": "error",
-                    "error": "Permission denied",
-                })
-                .into(),
+pub async fn edit_post(
+    ctx: RequirePermissionContext,
+    Json(descriptor): Json<EditPostDescriptor>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    if ctx.valid(vec![Permission::Post]).unwrap() {
+        if let Some(p) = super::INSTANCE
+            .posts
+            .read()
+            .iter()
+            .find(|p| p.read().id == descriptor.post)
+        {
+            let pr = p.read();
+
+            if pr.publisher != ctx.account_id
+                || pr
+                    .status
+                    .back()
+                    .map(|e| matches!(e.status, PostAcceptationStatus::Submitted(_)))
+                    .unwrap_or_default()
+            {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(json!({ "error": "permission denied" })),
+                );
+            }
+
+            drop(pr);
+
+            for variant in descriptor.variants.iter() {
+                if let Err(err) = apply_edit_post_variant(variant, descriptor.post, ctx.account_id)
+                {
+                    return (
+                        StatusCode::FORBIDDEN,
+                        Json(json!({ "error": err.to_string() })),
+                    );
+                }
+            }
+
+            let post = p.read();
+            super::save_post(post.deref());
+
+            (StatusCode::OK, Json(json!({})))
+        } else {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "target post not found" })),
             )
         }
-    };
-    let descriptor: EditPostDescriptor = req.body_json().await?;
-    match cxt.valid(vec![Permission::Post]).await {
-        Ok(able) => {
-            if able {
-                for p in super::INSTANCE.posts.read().await.iter() {
-                    let pr = p.read().await;
-                    if pr.id == descriptor.post {
-                        if pr.publisher != cxt.account_id
-                            || pr
-                                .status
-                                .back()
-                                .map(|e| matches!(e.status, PostAcceptationStatus::Submitted(_)))
-                                .unwrap_or_default()
-                        {
-                            return Ok::<tide::Response, tide::Error>(
-                                json!({
-                                    "status": "error",
-                                    "error": "Permission denied",
-                                })
-                                .into(),
-                            );
-                        }
-                        let id = pr.id;
-                        drop(pr);
-                        for variant in descriptor.variants.iter() {
-                            match apply_edit_post_variant(variant, id, cxt.account_id).await {
-                                Some(err) => {
-                                    return Ok::<tide::Response, tide::Error>(
-                                        json!({
-                                            "status": "error",
-                                            "error": format!("Error occurred with post variant {id}: {err}"),
-                                        })
-                                        .into(),
-                                    );
-                                }
-                                _ => (),
-                            }
-                        }
-                        let post = p.read().await;
-                        if !super::save_post(post.deref()).await {
-                            error!("Error while saving post {}", post.id);
-                        }
-                        return Ok::<tide::Response, tide::Error>(
-                            json!({
-                                "status": "success",
-                            })
-                            .into(),
-                        );
-                    }
-                }
-                Ok::<tide::Response, tide::Error>(
-                    json!({
-                        "status": "error",
-                        "error": "Target post not found",
-                    })
-                    .into(),
-                )
-            } else {
-                Ok::<tide::Response, tide::Error>(
-                    json!({
-                        "status": "error",
-                        "error": "Permission denied",
-                    })
-                    .into(),
-                )
-            }
-        }
-        Err(err) => Ok::<tide::Response, tide::Error>(
-            json!({
-                "status": "error",
-                "error": err.to_string(),
-            })
-            .into(),
-        ),
+    } else {
+        (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "permission denied" })),
+        )
     }
 }
-
 /// Apply this edition, return an err if error occurs.
-pub async fn apply_edit_post_variant(
+fn apply_edit_post_variant(
     variant: &EditPostVariant,
     post_id: u64,
     user_id: u64,
-) -> Option<String> {
-    let posts = super::INSTANCE.posts.read().await;
-    let mut post = match {
-        let mut e = None;
-        for p in posts.iter() {
-            if p.read().await.id == post_id {
-                e = Some(p.write().await);
-                break;
-            }
-        }
-        e
-    } {
-        Some(e) => e,
-        None => return Some("Post not found".to_string()),
-    };
+) -> Result<(), String> {
+    let posts = super::INSTANCE.posts.read();
+
+    let mut post;
+
+    post = posts
+        .iter()
+        .find(|p| p.read().id == post_id)
+        .ok_or_else(|| "target post not found".to_string())?
+        .write();
+
     match variant {
         EditPostVariant::Title(value) => post.metadata.title = value.clone(),
         EditPostVariant::Description(value) => post.metadata.description = value.clone(),
+
         EditPostVariant::Images(imgs) => {
-            let cache = super::cache::INSTANCE.caches.read().await;
+            let cache = super::cache::INSTANCE.caches.read();
             for img_id in post.images.iter() {
                 if let Some(e) = cache.iter().find(|e| e.hash == *img_id) {
                     e.blocked.store(false, atomic::Ordering::Relaxed)
@@ -495,12 +336,12 @@ pub async fn apply_edit_post_variant(
             }
             for img_id in imgs.iter() {
                 if !cache.iter().any(|e| e.hash == *img_id) {
-                    return Some(format!("Target image cache {} not fount", img_id));
+                    return Err(format!("target image cache {} not fount", img_id));
                 }
             }
             for img_id in imgs.iter() {
                 let mut unlock = true;
-                for e in super::INSTANCE.posts.read().await.iter() {
+                for e in super::INSTANCE.posts.read().iter() {
                     if let Some(er) = e.try_read() {
                         if er.images.contains(img_id) {
                             unlock = false;
@@ -519,22 +360,24 @@ pub async fn apply_edit_post_variant(
                 }
             }
         }
+
         EditPostVariant::TimeRange(start, end) => {
             if start
                 .checked_add_days(Days::new(7))
                 .map_or(false, |e| &e < end)
             {
-                return Some("Post time out of range".to_string());
+                return Err("post time out of range".to_string());
             }
             post.metadata.time_range = (*start, *end);
         }
+
         EditPostVariant::CancelSubmission => {
             if post
                 .status
                 .back()
                 .map_or(true, |e| matches!(e.status, PostAcceptationStatus::Pending))
             {
-                return Some("Target post was already pended".to_string());
+                return Err("target post was already pended".to_string());
             }
             post.status.push_back(super::PostAcceptationData {
                 operator: user_id,
@@ -542,54 +385,53 @@ pub async fn apply_edit_post_variant(
                 time: Utc::now(),
             })
         }
+
         EditPostVariant::Destroy => {
-            if !super::remove_post(post.deref()).await {
-                error!("Post {} save failed", post.id);
-            }
             drop(post);
             drop(posts);
-            let mut posts = super::INSTANCE.posts.write().await;
-            let mut i = None;
-            for post in posts.iter().enumerate() {
-                let pr = post.1.read().await;
-                if pr.id == post_id {
-                    i = Some(post.0);
-                    for img_id in pr.images.iter() {
-                        let mut unlock = true;
-                        for e in super::INSTANCE.posts.read().await.iter() {
-                            if let Some(er) = e.try_read() {
-                                if er.images.contains(img_id) {
-                                    unlock = false;
-                                    break;
-                                }
-                            }
-                        }
 
-                        if unlock {
-                            for im in super::cache::INSTANCE.caches.read().await.iter() {
-                                if &im.hash == img_id {
-                                    im.blocked.store(false, atomic::Ordering::Relaxed);
-                                    break;
-                                }
+            let mut posts = super::INSTANCE.posts.write();
+
+            if let Some(post) = posts.iter().enumerate().find(|e| e.1.read().id == post_id) {
+                let pr = post.1.read();
+
+                for img_id in pr.images.iter() {
+                    let mut unlock = true;
+                    for e in super::INSTANCE.posts.read().iter() {
+                        if e.read().images.contains(img_id) {
+                            unlock = false;
+                            break;
+                        }
+                    }
+
+                    if unlock {
+                        for im in super::cache::INSTANCE.caches.read().iter() {
+                            if im.hash == *img_id {
+                                im.blocked.store(false, atomic::Ordering::Relaxed);
+                                break;
                             }
                         }
                     }
-                    break;
                 }
-            }
-            match i {
-                Some(e) => {
-                    posts.remove(e);
-                }
-                None => return Some("Post not found".to_string()),
+
+                super::remove_post(pr.deref());
+
+                let i = post.0;
+                drop(pr);
+                drop(post);
+                posts.remove(i);
+            } else {
+                return Err("post not found".to_string());
             }
         }
+
         EditPostVariant::RequestReview(msg) => {
             if post.status.back().map_or(true, |e| {
                 matches!(e.status, PostAcceptationStatus::Submitted(_))
             }) {
-                return Some("Target post was already submitted".to_string());
+                return Err("target post was already submitted".to_string());
             }
+
             post.status.push_back(super::PostAcceptationData {
                 operator: user_id,
                 status: PostAcceptationStatus::Submitted(msg.clone()),
@@ -597,208 +439,133 @@ pub async fn apply_edit_post_variant(
             })
         }
     }
-    None
+
+    Ok(())
 }
 
-pub async fn get_posts_info(mut req: Request<()>) -> tide::Result {
-    let cxt = match RequirePermissionContext::from_header(&req) {
-        Some(e) => e,
-        None => {
-            return Ok::<tide::Response, tide::Error>(
-                json!({
-                    "status": "error",
-                    "error": "Permission denied",
-                })
-                .into(),
-            )
-        }
-    };
-    let descriptor: GetPostsInfoDescriptor = req.body_json().await?;
-    match cxt.valid(vec![Permission::View]).await {
-        Ok(able) => {
-            if able {
-                let am = account::INSTANCE.inner().read().await;
-                let ar = am
-                    .get(
-                        *account::INSTANCE
-                            .index()
-                            .read()
-                            .await
-                            .get(&cxt.account_id)
-                            .unwrap(),
-                    )
-                    .unwrap()
-                    .read()
-                    .await;
-                let mut results = Vec::new();
-                let posts = super::INSTANCE.posts.read().await;
-                let date = Utc::now().date_naive();
-                for p in descriptor.posts.iter() {
-                    let mut ps = false;
-                    for e in posts.iter() {
-                        let er = e.read().await;
-                        if er.id == *p {
-                            if er.publisher == cxt.account_id
-                                || ar.has_permission(Permission::Check)
-                            {
-                                results.push(GetPostInfoResult::Full(er.clone()))
-                            } else if er.metadata.time_range.0 <= date
-                                && ar.has_permission(Permission::View)
-                            {
-                                results.push(GetPostInfoResult::Foreign {
-                                    id: er.id,
-                                    images: er.images.clone(),
-                                    title: er.metadata.title.clone(),
-                                    archived: er.metadata.time_range.1 < date,
-                                })
-                            } else {
-                                results.push(GetPostInfoResult::NotFound(er.id))
-                            }
-                            ps = true;
-                            break;
-                        }
+pub async fn get_posts_info(
+    ctx: RequirePermissionContext,
+    Json(descriptor): Json<GetPostsInfoDescriptor>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    if ctx.valid(vec![Permission::View]).unwrap() {
+        let am = account::INSTANCE.inner().read();
+        let ar = am
+            .get(*account::INSTANCE.index().get(&ctx.account_id).unwrap())
+            .unwrap()
+            .read();
+
+        let mut results = Vec::new();
+        let posts = super::INSTANCE.posts.read();
+        let date = Utc::now().date_naive();
+
+        for p in descriptor.posts.iter() {
+            let mut ps = false;
+
+            for e in posts.iter() {
+                let er = e.read();
+
+                if er.id == *p {
+                    if er.publisher == ctx.account_id || ar.has_permission(Permission::Check) {
+                        results.push(GetPostInfoResult::Full(er.clone()))
+                    } else if er.metadata.time_range.0 <= date
+                        && ar.has_permission(Permission::View)
+                    {
+                        results.push(GetPostInfoResult::Foreign {
+                            id: er.id,
+                            images: er.images.clone(),
+                            title: er.metadata.title.clone(),
+                            archived: er.metadata.time_range.1 < date,
+                        })
+                    } else {
+                        results.push(GetPostInfoResult::NotFound(er.id))
                     }
-                    if !ps {
-                        results.push(GetPostInfoResult::NotFound(*p))
-                    }
+
+                    ps = true;
+                    break;
                 }
-                Ok::<tide::Response, tide::Error>(
-                    json!({
-                        "status": "success",
-                        "results": results,
-                    })
-                    .into(),
-                )
-            } else {
-                Ok::<tide::Response, tide::Error>(
-                    json!({
-                        "status": "error",
-                        "error": "Permission denied",
-                    })
-                    .into(),
-                )
+            }
+
+            if !ps {
+                results.push(GetPostInfoResult::NotFound(*p))
             }
         }
-        Err(err) => Ok::<tide::Response, tide::Error>(
-            json!({
-                "status": "error",
-                "error": err.to_string(),
-            })
-            .into(),
-        ),
+
+        (StatusCode::OK, Json(json!({ "results": results })))
+    } else {
+        (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "permission denied" })),
+        )
     }
 }
 
-pub async fn approve_post(mut req: Request<()>) -> tide::Result {
-    let cxt = match RequirePermissionContext::from_header(&req) {
-        Some(e) => e,
-        None => {
-            return Ok::<tide::Response, tide::Error>(
-                json!({
-                    "status": "error",
-                    "error": "Permission denied",
-                })
-                .into(),
-            )
-        }
-    };
-    let descriptor: ApprovePostDescriptor = req.body_json().await?;
-    match cxt.valid(vec![Permission::Approve]).await {
-        Ok(able) => {
-            if able {
-                let posts = super::INSTANCE.posts.read().await;
-                for p in posts.iter() {
-                    let pr = p.read().await;
-                    if pr.id == descriptor.post {
-                        drop(pr);
-                        let mut pw = p.write().await;
-                        match descriptor.variant {
-                            ApprovePostVariant::Accept(msg) => {
-                                if pw.status.back().map_or(false, |e| {
-                                    matches!(e.status, PostAcceptationStatus::Accepted(_))
-                                }) {
-                                    return Ok::<tide::Response, tide::Error>(
-                                        json!({
-                                            "status": "error",
-                                            "error": "Target post has already been accepted",
-                                        })
-                                        .into(),
-                                    );
-                                }
-                                pw.status.push_back(super::PostAcceptationData {
-                                    operator: cxt.account_id,
-                                    status: PostAcceptationStatus::Accepted(
-                                        msg.unwrap_or_default(),
-                                    ),
-                                    time: Utc::now(),
-                                });
-                            }
-                            ApprovePostVariant::Reject(msg) => {
-                                if pw.status.back().map_or(false, |e| {
-                                    matches!(e.status, PostAcceptationStatus::Rejected(_))
-                                }) {
-                                    return Ok::<tide::Response, tide::Error>(
-                                        json!({
-                                            "status": "error",
-                                            "error": "Target post has already been rejected",
-                                        })
-                                        .into(),
-                                    );
-                                }
-                                pw.status.push_back(super::PostAcceptationData {
-                                    operator: cxt.account_id,
-                                    status: PostAcceptationStatus::Rejected({
-                                        if msg.is_empty() {
-                                            return Ok::<tide::Response, tide::Error>(
-                                                json!({
-                                                    "status": "error",
-                                                    "error": "Message couldn't be empty",
-                                                })
-                                                .into(),
-                                            );
-                                        }
-                                        msg
-                                    }),
-                                    time: Utc::now(),
-                                });
-                            }
-                        };
-
-                        if !super::save_post(pw.deref()).await {
-                            error!("Error while saving post {}", pw.id);
-                        }
-
-                        return Ok::<tide::Response, tide::Error>(
-                            json!({
-                                "status": "success",
-                            })
-                            .into(),
+pub async fn approve_post(
+    ctx: RequirePermissionContext,
+    Json(descriptor): Json<ApprovePostDescriptor>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    if ctx.valid(vec![Permission::Approve]).unwrap() {
+        let posts = super::INSTANCE.posts.read();
+        if let Some(p) = posts.iter().find(|e| e.read().id == descriptor.post) {
+            let mut pw = p.write();
+            match descriptor.variant {
+                ApprovePostVariant::Accept(msg) => {
+                    if pw.status.back().map_or(false, |e| {
+                        matches!(e.status, PostAcceptationStatus::Accepted(_))
+                    }) {
+                        return (
+                            StatusCode::FORBIDDEN,
+                            Json(json!({ "error": "target post has already been accepted" })),
                         );
                     }
+
+                    pw.status.push_back(super::PostAcceptationData {
+                        operator: ctx.account_id,
+                        status: PostAcceptationStatus::Accepted(msg.unwrap_or_default()),
+                        time: Utc::now(),
+                    });
                 }
-                Ok::<tide::Response, tide::Error>(
-                    json!({
-                        "status": "error",
-                        "error": "Target post not found",
-                    })
-                    .into(),
-                )
-            } else {
-                Ok::<tide::Response, tide::Error>(
-                    json!({
-                        "status": "error",
-                        "error": "Permission denied",
-                    })
-                    .into(),
-                )
-            }
+
+                ApprovePostVariant::Reject(msg) => {
+                    if pw.status.back().map_or(false, |e| {
+                        matches!(e.status, PostAcceptationStatus::Rejected(_))
+                    }) {
+                        return (
+                            StatusCode::FORBIDDEN,
+                            Json(json!({ "error": "target post has already been rejected" })),
+                        );
+                    }
+
+                    pw.status.push_back(super::PostAcceptationData {
+                        operator: ctx.account_id,
+
+                        status: PostAcceptationStatus::Rejected({
+                            if msg.is_empty() {
+                                return (
+                                    StatusCode::FORBIDDEN,
+                                    Json(json!({ "error": "message body could not be empty" })),
+                                );
+                            }
+
+                            msg
+                        }),
+
+                        time: Utc::now(),
+                    });
+                }
+            };
+
+            super::save_post(pw.deref());
+            return (StatusCode::OK, Json(json!({})));
         }
-        Err(err) => Ok::<tide::Response, tide::Error>(
-            json!({
-                "status": "error",
-                "error": err.to_string(),
-            })
-            .into(),
-        ),
+
+        (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "target post not found" })),
+        )
+    } else {
+        (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "permission denied" })),
+        )
     }
 }

@@ -1,9 +1,9 @@
 pub(crate) mod cache;
 pub mod handle;
 
-use async_std::sync::RwLock;
 use image::ImageError;
 use once_cell::sync::Lazy;
+use parking_lot::RwLock;
 use std::{error::Error, fmt::Display};
 
 pub use sms3rs_shared::post::*;
@@ -25,43 +25,36 @@ impl Display for PostError {
 
 impl Error for PostError {}
 
-#[must_use = "The save result should be handled"]
-pub async fn save_post(_post: &Post) -> bool {
+pub fn save_post(post: &Post) {
     #[cfg(not(test))]
     {
-        use async_std::fs::File;
-        use async_std::io::WriteExt;
+        let this = post.clone();
 
-        match File::create(format!("./data/posts/{}.toml", _post.id)).await {
-            Ok(mut file) => file
-                .write_all(
-                    match toml::to_string(_post) {
-                        Ok(s) => s,
-                        Err(_) => return false,
-                    }
-                    .as_bytes(),
-                )
-                .await
-                .is_ok(),
-            Err(_) => false,
-        }
-    }
+        tokio::spawn(async move {
+            use tokio::io::AsyncWriteExt;
 
-    #[cfg(test)]
-    true
+            if let Ok(mut file) =
+                tokio::fs::File::create(format!("./data/posts/{}.toml", this.id)).await
+            {
+                file.write_all(toml::to_string(&this).unwrap().as_bytes())
+                    .await
+                    .unwrap()
+            }
+        })
+    };
 }
 
-#[must_use = "The deletion result should be handled"]
-pub async fn remove_post(_post: &Post) -> bool {
+pub fn remove_post(post: &Post) {
     #[cfg(not(test))]
     {
-        return async_std::fs::remove_file(format!("./data/posts/{}.toml", _post.id))
-            .await
-            .is_ok();
-    }
+        let id = post.id;
 
-    #[cfg(test)]
-    true
+        tokio::spawn(async move {
+            tokio::fs::remove_file(format!("./data/posts/{}.toml", id))
+                .await
+                .unwrap()
+        });
+    }
 }
 
 pub struct PostManager {
@@ -76,9 +69,10 @@ impl PostManager {
             use std::io::Read;
 
             let mut vec = Vec::new();
+
             for dir in fs::read_dir("./data/posts").unwrap() {
-                match dir {
-                    Ok(f) => match {
+                if let Ok(f) = dir {
+                    if let Ok(cache) = {
                         toml::from_str::<Post>(&{
                             let mut string = String::new();
                             File::open(f.path())
@@ -88,12 +82,11 @@ impl PostManager {
                             string
                         })
                     } {
-                        Ok(cache) => vec.push(cache),
-                        Err(_) => (),
-                    },
-                    Err(_) => (),
+                        vec.push(cache)
+                    }
                 }
             }
+
             Self {
                 posts: {
                     let mut v = Vec::new();
@@ -111,24 +104,17 @@ impl PostManager {
         }
     }
 
-    pub async fn push(&self, post: Post) {
-        self.posts.write().await.push(RwLock::new(post))
+    pub fn push(&self, post: Post) {
+        self.posts.write().push(RwLock::new(post))
     }
 
     /// Indicates if the target id is already contained in this instance.
-    pub async fn contains_id(&self, id: u64) -> bool {
-        for post in self.posts.read().await.iter() {
-            if post.read().await.id == id {
-                return true;
-            }
-        }
-        false
+    pub fn contains_id(&self, id: u64) -> bool {
+        self.posts.read().iter().any(|e| e.read().id == id)
     }
 
     #[cfg(test)]
-    pub async fn reset(&self) {
-        use std::ops::DerefMut;
-
-        *self.posts.write().await.deref_mut() = Vec::new();
+    pub fn reset(&self) {
+        *std::ops::DerefMut::deref_mut(&mut self.posts.write()) = Vec::new();
     }
 }
