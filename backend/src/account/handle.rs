@@ -339,7 +339,7 @@ pub fn apply_edit_variant(
     account: &mut Account,
 ) -> Result<(), AccountError> {
     match account {
-        Account::Unverified(_) => return Err(AccountError::UserUnverifiedError),
+        Account::Unverified(_) => return Err(AccountError::UserUnverified),
         Account::Verified { attributes, .. } => match mt {
             AccountEditVariant::Name(name) => attributes.name = name,
             AccountEditVariant::SchoolId(id) => attributes.school_id = id,
@@ -350,7 +350,7 @@ pub fn apply_edit_variant(
                 if attributes.password_sha == digest(old) {
                     attributes.password_sha = digest(new)
                 } else {
-                    return Err(AccountError::PasswordIncorrectError);
+                    return Err(AccountError::PasswordIncorrect);
                 }
             }
             AccountEditVariant::TokenExpireTime(time) => attributes.token_expiration_time = time,
@@ -632,7 +632,7 @@ pub mod manage {
         context: &RequirePermissionContext,
     ) -> Result<(), AccountError> {
         match account {
-            Account::Unverified(_) => return Err(AccountError::UserUnverifiedError),
+            Account::Unverified(_) => return Err(AccountError::UserUnverified),
             Account::Verified { attributes, .. } => match mt {
                 AccountModifyVariant::Name(name) => attributes.name = name,
                 AccountModifyVariant::SchoolId(id) => attributes.school_id = id,

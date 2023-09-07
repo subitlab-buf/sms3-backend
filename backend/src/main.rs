@@ -93,7 +93,7 @@ impl RequirePermissionContext {
                     account::Account::Unverified(_) => {
                         return Err(AccountManagerError::Account(
                             self.account_id,
-                            account::AccountError::UserUnverifiedError,
+                            account::AccountError::UserUnverified,
                         ))
                     }
                     account::Account::Verified { tokens, .. } => tokens.token_usable(&self.token),

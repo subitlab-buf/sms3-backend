@@ -24,11 +24,11 @@ toml = "0.7"
 sha256 = "*"
 image = "0.24"
 sms3rs-shared = { version = "*", path = "../shared" }
-anyhow = "*"
 parking_lot = "*"
 hashbrown = "*"
 dashmap = "*"
 mime = "*"
+thiserror = "*"
 
 [dev-dependencies]
 serial_test = "*"
