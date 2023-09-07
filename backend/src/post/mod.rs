@@ -25,10 +25,10 @@ impl Display for PostError {
 
 impl Error for PostError {}
 
-pub fn save_post(post: &Post) {
+pub fn save_post(_post: &Post) {
     #[cfg(not(test))]
     {
-        let this = post.clone();
+        let this = _post.clone();
 
         tokio::spawn(async move {
             use tokio::io::AsyncWriteExt;
@@ -44,10 +44,10 @@ pub fn save_post(post: &Post) {
     };
 }
 
-pub fn remove_post(post: &Post) {
+pub fn remove_post(_post: &Post) {
     #[cfg(not(test))]
     {
-        let id = post.id;
+        let id = _post.id;
 
         tokio::spawn(async move {
             tokio::fs::remove_file(format!("./data/posts/{}.toml", id))

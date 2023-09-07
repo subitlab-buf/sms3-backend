@@ -12,7 +12,6 @@ use chrono::Days;
 use chrono::Utc;
 use serde_json::json;
 use std::collections::hash_map::DefaultHasher;
-use std::collections::VecDeque;
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::ops::Deref;
@@ -70,7 +69,7 @@ pub async fn get_image(
     Json(descriptor): Json<GetImageDescriptor>,
 ) -> (StatusCode, Vec<u8>) {
     if ctx.valid(vec![Permission::View]).unwrap() {
-        if let Some(img) = super::cache::INSTANCE
+        if let Some(_img) = super::cache::INSTANCE
             .caches
             .read()
             .iter()
@@ -80,7 +79,8 @@ pub async fn get_image(
             {
                 use std::io::Read;
 
-                if let Ok(mut file) = std::fs::File::open(format!("./data/images/{}.png", img.hash))
+                if let Ok(mut file) =
+                    std::fs::File::open(format!("./data/images/{}.png", _img.hash))
                 {
                     let mut vec = Vec::new();
                     let _ = file.read_to_end(&mut vec);
