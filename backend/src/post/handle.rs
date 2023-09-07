@@ -152,13 +152,13 @@ pub async fn new_post(
             images: descriptor.images,
 
             status: {
-                let mut deque = VecDeque::new();
-                deque.push_back(super::PostAcceptationData {
+                let mut vec = Vec::new();
+                vec.push(super::PostAcceptationData {
                     operator: ctx.account_id,
                     status: super::PostAcceptationStatus::Pending,
                     time: Utc::now(),
                 });
-                deque
+                vec
             },
 
             metadata: super::PostMetadata {
@@ -235,7 +235,7 @@ fn matches_get_post_filter(filter: &GetPostsFilter, post: &Post, user: &Account)
     (match filter {
         GetPostsFilter::Acceptation(status) => post
             .status
-            .back()
+            .last()
             .map_or(false, |s| status.matches(&s.status)),
 
         GetPostsFilter::Account(account) => &post.publisher == account,
@@ -268,7 +268,7 @@ pub async fn edit_post(
             if pr.publisher != ctx.account_id
                 || pr
                     .status
-                    .back()
+                    .last()
                     .map(|e| matches!(e.status, PostAcceptationStatus::Submitted(_)))
                     .unwrap_or_default()
             {
@@ -374,12 +374,13 @@ fn apply_edit_post_variant(
         EditPostVariant::CancelSubmission => {
             if post
                 .status
-                .back()
+                .last()
                 .map_or(true, |e| matches!(e.status, PostAcceptationStatus::Pending))
             {
                 return Err("target post was already pended".to_string());
             }
-            post.status.push_back(super::PostAcceptationData {
+
+            post.status.push(super::PostAcceptationData {
                 operator: user_id,
                 status: PostAcceptationStatus::Pending,
                 time: Utc::now(),
@@ -418,7 +419,6 @@ fn apply_edit_post_variant(
 
                 let i = post.0;
                 drop(pr);
-                drop(post);
                 posts.remove(i);
             } else {
                 return Err("post not found".to_string());
@@ -426,13 +426,13 @@ fn apply_edit_post_variant(
         }
 
         EditPostVariant::RequestReview(msg) => {
-            if post.status.back().map_or(true, |e| {
+            if post.status.last().map_or(true, |e| {
                 matches!(e.status, PostAcceptationStatus::Submitted(_))
             }) {
                 return Err("target post was already submitted".to_string());
             }
 
-            post.status.push_back(super::PostAcceptationData {
+            post.status.push(super::PostAcceptationData {
                 operator: user_id,
                 status: PostAcceptationStatus::Submitted(msg.clone()),
                 time: Utc::now(),
@@ -509,7 +509,7 @@ pub async fn approve_post(
             let mut pw = p.write();
             match descriptor.variant {
                 ApprovePostVariant::Accept(msg) => {
-                    if pw.status.back().map_or(false, |e| {
+                    if pw.status.last().map_or(false, |e| {
                         matches!(e.status, PostAcceptationStatus::Accepted(_))
                     }) {
                         return (
@@ -518,7 +518,7 @@ pub async fn approve_post(
                         );
                     }
 
-                    pw.status.push_back(super::PostAcceptationData {
+                    pw.status.push(super::PostAcceptationData {
                         operator: ctx.account_id,
                         status: PostAcceptationStatus::Accepted(msg.unwrap_or_default()),
                         time: Utc::now(),
@@ -526,7 +526,7 @@ pub async fn approve_post(
                 }
 
                 ApprovePostVariant::Reject(msg) => {
-                    if pw.status.back().map_or(false, |e| {
+                    if pw.status.last().map_or(false, |e| {
                         matches!(e.status, PostAcceptationStatus::Rejected(_))
                     }) {
                         return (
@@ -535,7 +535,7 @@ pub async fn approve_post(
                         );
                     }
 
-                    pw.status.push_back(super::PostAcceptationData {
+                    pw.status.push(super::PostAcceptationData {
                         operator: ctx.account_id,
 
                         status: PostAcceptationStatus::Rejected({

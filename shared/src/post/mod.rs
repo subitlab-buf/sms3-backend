@@ -15,7 +15,7 @@ pub struct Post {
     pub publisher: u64,
     /// The status of this post (including history status inside a deque).
     /// Newer status will be pushed to back of the deque.
-    pub status: VecDeque<PostAcceptationData>,
+    pub status: Vec<PostAcceptationData>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
