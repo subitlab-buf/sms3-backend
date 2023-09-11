@@ -4,26 +4,16 @@ pub mod handle;
 use image::ImageError;
 use once_cell::sync::Lazy;
 use parking_lot::RwLock;
-use std::{error::Error, fmt::Display};
 
 pub use sms3rs_shared::post::*;
 
 pub static INSTANCE: Lazy<PostManager> = Lazy::new(PostManager::new);
 
-#[derive(Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum PostError {
-    ImageError(ImageError),
+    #[error("image error: {0}")]
+    Image(ImageError),
 }
-
-impl Display for PostError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            PostError::ImageError(err) => err.fmt(f),
-        }
-    }
-}
-
-impl Error for PostError {}
 
 pub fn save_post(_post: &Post) {
     #[cfg(not(test))]

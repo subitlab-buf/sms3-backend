@@ -27,7 +27,7 @@ pub struct PostImageCache {
 impl PostImageCache {
     /// Create a new cache and its hash from image bytes.
     pub fn new(bytes: &Vec<u8>, uploader: u64) -> Result<(Self, u64), PostError> {
-        let image = image::load_from_memory(bytes).map_err(PostError::ImageError)?;
+        let image = image::load_from_memory(bytes).map_err(PostError::Image)?;
 
         let hash = {
             let mut hasher = DefaultHasher::new();

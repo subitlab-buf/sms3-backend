@@ -23,6 +23,7 @@ pub enum AccountVerifyVariant {
         organization: Option<String>,
         password: String,
     },
+
     /// Verify a resetpassword session.
     ResetPassword {
         email: lettre::Address,
