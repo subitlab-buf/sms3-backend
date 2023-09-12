@@ -5,6 +5,7 @@ use crate::account::Account;
 use crate::account::Permission;
 use crate::post::cache::PostImageCache;
 use crate::RequirePermissionContext;
+use crate::ResError;
 use axum::body::Bytes;
 use axum::http::StatusCode;
 use axum::Json;
@@ -22,213 +23,155 @@ use sms3rs_shared::post::handle::*;
 /// Read and store a cache image with cache id returned.
 pub async fn cache_image(
     (ctx, bytes): (RequirePermissionContext, Bytes),
-) -> (StatusCode, Json<serde_json::Value>) {
-    if ctx.valid(vec![Permission::Post]).unwrap() {
-        let id;
+) -> axum::response::Result<Json<serde_json::Value>> {
+    ctx.valid(&[Permission::Post])
+        .map_err(|err| ResError(err))?;
 
-        super::cache::INSTANCE.push(
-            match PostImageCache::new(
-                &{
-                    if bytes.len() > 50_000_000 {
-                        return (
-                            StatusCode::PAYLOAD_TOO_LARGE,
-                            Json(json!({ "error": "image too big" })),
-                        );
-                    }
+    let cache = PostImageCache::new(&bytes, ctx.account_id).map_err(|err| ResError(err))?;
+    let id = cache.hash;
 
-                    bytes.to_vec()
-                },
-                ctx.account_id,
-            ) {
-                Ok(e) => {
-                    id = e.1;
-                    e.0
-                }
+    super::cache::INSTANCE.push(cache);
 
-                Err(err) => {
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({ "error": err.to_string() })),
-                    );
-                }
-            },
-        );
-
-        (StatusCode::OK, Json(json!({ "hash": id })))
-    } else {
-        (
-            StatusCode::FORBIDDEN,
-            Json(json!({ "error": "permission denied" })),
-        )
-    }
+    Ok(Json(json!({ "hash": id })))
 }
 
 /// Get image png bytes from target image cache hash.
 pub async fn get_image(
     ctx: RequirePermissionContext,
     Json(descriptor): Json<GetImageDescriptor>,
-) -> (StatusCode, Vec<u8>) {
-    if ctx.valid(vec![Permission::View]).unwrap() {
-        if let Some(_img) = super::cache::INSTANCE
-            .caches
-            .read()
-            .iter()
-            .find(|e| e.hash == descriptor.hash)
-        {
-            #[cfg(not(test))]
-            {
-                use std::io::Read;
+) -> axum::response::Result<Vec<u8>> {
+    ctx.valid(&[Permission::View]).map_err(ResError)?;
 
-                if let Ok(mut file) =
-                    std::fs::File::open(format!("./data/images/{}.png", _img.hash))
-                {
-                    let mut vec = Vec::new();
-                    let _ = file.read_to_end(&mut vec);
-                    return (StatusCode::OK, vec);
-                } else {
-                    return (StatusCode::NOT_FOUND, Vec::new());
-                }
-            }
+    if let Some(_img) = super::cache::INSTANCE
+        .caches
+        .read()
+        .iter()
+        .find(|e| e.hash == descriptor.hash)
+    {
+        #[cfg(not(test))]
+        return std::fs::File::open(format!("./data/images/{}.png", _img.hash))
+            .map(|mut file| {
+                let mut vec = Vec::new();
+                let _ = std::io::Read::read_to_end(&mut file, &mut vec);
 
-            #[cfg(test)]
-            {
-                unreachable!("test not covered");
-            }
-        }
+                vec
+            })
+            .map_err(|err| ResError(err).into());
 
-        (StatusCode::NOT_FOUND, Vec::new())
-    } else {
-        (StatusCode::FORBIDDEN, Vec::new())
+        #[cfg(test)]
+        unreachable!("test not covered");
     }
+
+    Err(ResError(super::cache::Error::NotFound).into())
 }
 
 pub async fn new_post(
     ctx: RequirePermissionContext,
     Json(descriptor): Json<PostDescriptor>,
-) -> (StatusCode, Json<serde_json::Value>) {
-    if ctx.valid(vec![Permission::Post]).unwrap() {
-        let cache = super::cache::INSTANCE.caches.read();
+) -> axum::response::Result<Json<serde_json::Value>> {
+    ctx.valid(&[Permission::Post]).map_err(ResError)?;
+    let cache = super::cache::INSTANCE.caches.read();
 
-        if descriptor
-            .images
+    if descriptor
+        .images
+        .iter()
+        .any(|img_id| !cache.iter().any(|e| e.hash == *img_id))
+    {
+        return Err(ResError(super::cache::Error::NotFound).into());
+    }
+
+    descriptor.images.iter().for_each(|img_id| {
+        cache
             .iter()
-            .any(|img_id| !cache.iter().any(|e| e.hash == *img_id))
-        {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({ "error": "target image not found"})),
-            );
-        }
+            .find(|e| e.hash == *img_id)
+            .unwrap()
+            .blocked
+            .store(true, atomic::Ordering::Release)
+    });
 
-        descriptor.images.iter().for_each(|img_id| {
-            cache
-                .iter()
-                .find(|e| e.hash == *img_id)
-                .unwrap()
-                .blocked
-                .store(true, atomic::Ordering::Relaxed)
-        });
+    let post = Post {
+        id: {
+            let mut hasher = DefaultHasher::new();
 
-        let post = Post {
-            id: {
-                let mut hasher = DefaultHasher::new();
+            descriptor.title.hash(&mut hasher);
+            descriptor.description.hash(&mut hasher);
+            descriptor.images.hash(&mut hasher);
 
-                descriptor.title.hash(&mut hasher);
-                descriptor.description.hash(&mut hasher);
-                descriptor.images.hash(&mut hasher);
+            let id = hasher.finish();
 
-                let id = hasher.finish();
+            if super::INSTANCE.contains_id(id) {
+                return Err(ResError(super::Error::Conflict).into());
+            }
 
-                if super::INSTANCE.contains_id(id) {
-                    return (
-                        StatusCode::CONFLICT,
-                        Json(json!({ "error": "post id conflicted" })),
-                    );
+            id
+        },
+
+        status: {
+            let mut vec = Vec::new();
+            vec.push(super::PostAcceptationData {
+                operator: ctx.account_id,
+                status: super::PostAcceptationStatus::Pending,
+                time: Utc::now(),
+            });
+            vec
+        },
+
+        metadata: super::PostMetadata {
+            title: descriptor.title,
+            description: descriptor.description,
+
+            time_range: {
+                if descriptor.time_range.0 + Days::new(7) < descriptor.time_range.1 {
+                    return Err(ResError(super::Error::DateOutOfRange).into());
                 }
 
-                id
+                descriptor.time_range
             },
+        },
 
-            images: descriptor.images,
+        images: descriptor.images,
+        publisher: ctx.account_id,
+    };
 
-            status: {
-                let mut vec = Vec::new();
-                vec.push(super::PostAcceptationData {
-                    operator: ctx.account_id,
-                    status: super::PostAcceptationStatus::Pending,
-                    time: Utc::now(),
-                });
-                vec
-            },
+    super::save_post(&post);
 
-            metadata: super::PostMetadata {
-                title: descriptor.title,
-                description: descriptor.description,
+    let id = post.id;
+    super::INSTANCE.push(post);
 
-                time_range: {
-                    if descriptor.time_range.0 + Days::new(7) < descriptor.time_range.1 {
-                        return (
-                            StatusCode::FORBIDDEN,
-                            Json(json!({ "error": "post time out of range" })),
-                        );
-                    }
-
-                    descriptor.time_range
-                },
-            },
-
-            publisher: ctx.account_id,
-        };
-
-        super::save_post(&post);
-
-        let id = post.id;
-        super::INSTANCE.push(post);
-
-        (StatusCode::OK, Json(json!({ "post_id": id })))
-    } else {
-        (
-            StatusCode::FORBIDDEN,
-            Json(json!({ "error": "permission denied" })),
-        )
-    }
+    Ok(Json(json!({ "post_id": id })))
 }
 
 pub async fn get_posts(
     ctx: RequirePermissionContext,
     Json(descriptor): Json<GetPostsDescriptor>,
-) -> (StatusCode, Json<serde_json::Value>) {
-    if ctx.valid(vec![Permission::View]).unwrap() {
-        let am = account::INSTANCE.inner().read();
-        let ar = am
-            .get(*account::INSTANCE.index().get(&ctx.account_id).unwrap())
-            .unwrap()
-            .read();
+) -> axum::response::Result<Json<serde_json::Value>> {
+    ctx.valid(&[Permission::View]).map_err(ResError)?;
 
-        let mut posts = Vec::new();
+    let am = account::INSTANCE.inner().read();
+    let ar = am
+        .get(*account::INSTANCE.index().get(&ctx.account_id).unwrap())
+        .unwrap()
+        .read();
 
-        super::INSTANCE.posts.read().iter().for_each(|p| {
-            let pr = p.read();
+    let mut posts = Vec::new();
 
-            if descriptor
-                .filters
-                .iter()
-                .all(|f| matches_get_post_filter(f, pr.deref(), ar.deref()))
-            {
-                posts.push(pr.id);
-            }
-        });
+    super::INSTANCE.posts.read().iter().for_each(|p| {
+        let pr = p.read();
 
-        (StatusCode::OK, Json(json!({ "posts": posts })))
-    } else {
-        (
-            StatusCode::FORBIDDEN,
-            Json(json!({ "error": "permission denied" })),
-        )
-    }
+        if descriptor
+            .filters
+            .iter()
+            .all(|f| matches_get_post_filter(f, pr.deref(), ar.deref()))
+        {
+            posts.push(pr.id);
+        }
+    });
+
+    Ok(Json(json!({ "posts": posts })))
 }
 
-/// If the target post matches this filter and the target account has enough permission to get the post.
+/// If the target post matches this filter and the target account
+/// has enough permission to get the post.
 fn matches_get_post_filter(filter: &GetPostsFilter, post: &Post, user: &Account) -> bool {
     let date = Utc::now().date_naive();
 
@@ -255,64 +198,48 @@ fn matches_get_post_filter(filter: &GetPostsFilter, post: &Post, user: &Account)
 pub async fn edit_post(
     ctx: RequirePermissionContext,
     Json(descriptor): Json<EditPostDescriptor>,
-) -> (StatusCode, Json<serde_json::Value>) {
-    if ctx.valid(vec![Permission::Post]).unwrap() {
-        if let Some(p) = super::INSTANCE
-            .posts
-            .read()
-            .iter()
-            .find(|p| p.read().id == descriptor.post)
+) -> axum::response::Result<()> {
+    ctx.valid(&[Permission::Post]).map_err(ResError)?;
+
+    if let Some(p) = super::INSTANCE
+        .posts
+        .read()
+        .iter()
+        .find(|p| p.read().id == descriptor.post)
+    {
+        let pr = p.read();
+
+        if pr.publisher != ctx.account_id
+            || pr
+                .status
+                .last()
+                .map(|e| matches!(e.status, PostAcceptationStatus::Submitted(_)))
+                .unwrap_or_default()
         {
-            let pr = p.read();
-
-            if pr.publisher != ctx.account_id
-                || pr
-                    .status
-                    .last()
-                    .map(|e| matches!(e.status, PostAcceptationStatus::Submitted(_)))
-                    .unwrap_or_default()
-            {
-                return (
-                    StatusCode::FORBIDDEN,
-                    Json(json!({ "error": "permission denied" })),
-                );
-            }
-
-            drop(pr);
-
-            for variant in descriptor.variants.iter() {
-                if let Err(err) = apply_edit_post_variant(variant, descriptor.post, ctx.account_id)
-                {
-                    return (
-                        StatusCode::FORBIDDEN,
-                        Json(json!({ "error": err.to_string() })),
-                    );
-                }
-            }
-
-            let post = p.read();
-            super::save_post(post.deref());
-
-            (StatusCode::OK, Json(json!({})))
-        } else {
-            (
-                StatusCode::NOT_FOUND,
-                Json(json!({ "error": "target post not found" })),
-            )
+            return Err(ResError(crate::account::Error::PermissionDenied).into());
         }
+
+        drop(pr);
+
+        for variant in descriptor.variants.iter() {
+            apply_edit_post_variant(variant, descriptor.post, ctx.account_id).map_err(ResError)?;
+        }
+
+        let post = p.read();
+        super::save_post(post.deref());
+
+        Ok(())
     } else {
-        (
-            StatusCode::FORBIDDEN,
-            Json(json!({ "error": "permission denied" })),
-        )
+        return Err(ResError(super::Error::NotFound).into());
     }
 }
+
 /// Apply this edition, return an err if error occurs.
 fn apply_edit_post_variant(
     variant: &EditPostVariant,
     post_id: u64,
     user_id: u64,
-) -> Result<(), String> {
+) -> Result<(), super::Error> {
     let posts = super::INSTANCE.posts.read();
 
     let mut post;
@@ -320,7 +247,7 @@ fn apply_edit_post_variant(
     post = posts
         .iter()
         .find(|p| p.read().id == post_id)
-        .ok_or_else(|| "target post not found".to_string())?
+        .ok_or(super::Error::NotFound)?
         .write();
 
     match variant {
@@ -331,12 +258,12 @@ fn apply_edit_post_variant(
             let cache = super::cache::INSTANCE.caches.read();
             for img_id in post.images.iter() {
                 if let Some(e) = cache.iter().find(|e| e.hash == *img_id) {
-                    e.blocked.store(false, atomic::Ordering::Relaxed)
+                    e.blocked.store(false, atomic::Ordering::Release)
                 }
             }
             for img_id in imgs.iter() {
                 if !cache.iter().any(|e| e.hash == *img_id) {
-                    return Err(format!("target image cache {} not fount", img_id));
+                    return Err(super::Error::Cache(super::cache::Error::NotFound));
                 }
             }
             for img_id in imgs.iter() {
@@ -356,7 +283,7 @@ fn apply_edit_post_variant(
                         .find(|e| e.hash == *img_id)
                         .unwrap()
                         .blocked
-                        .store(true, atomic::Ordering::Relaxed)
+                        .store(true, atomic::Ordering::Release)
                 }
             }
         }
@@ -366,7 +293,7 @@ fn apply_edit_post_variant(
                 .checked_add_days(Days::new(7))
                 .map_or(false, |e| &e < end)
             {
-                return Err("post time out of range".to_string());
+                return Err(super::Error::DateOutOfRange);
             }
             post.metadata.time_range = (*start, *end);
         }
@@ -377,7 +304,9 @@ fn apply_edit_post_variant(
                 .last()
                 .map_or(true, |e| matches!(e.status, PostAcceptationStatus::Pending))
             {
-                return Err("target post was already pended".to_string());
+                return Err(super::Error::AlreadyInStatus(
+                    PostAcceptationStatus::Pending,
+                ));
             }
 
             post.status.push(super::PostAcceptationData {
@@ -408,7 +337,7 @@ fn apply_edit_post_variant(
                     if unlock {
                         for im in super::cache::INSTANCE.caches.read().iter() {
                             if im.hash == *img_id {
-                                im.blocked.store(false, atomic::Ordering::Relaxed);
+                                im.blocked.store(false, atomic::Ordering::Release);
                                 break;
                             }
                         }
@@ -421,15 +350,19 @@ fn apply_edit_post_variant(
                 drop(pr);
                 posts.remove(i);
             } else {
-                return Err("post not found".to_string());
+                return Err(super::Error::NotFound);
             }
         }
 
         EditPostVariant::RequestReview(msg) => {
-            if post.status.last().map_or(true, |e| {
-                matches!(e.status, PostAcceptationStatus::Submitted(_))
-            }) {
-                return Err("target post was already submitted".to_string());
+            if let Some(sms3rs_shared::post::PostAcceptationData { status, .. }) =
+                post.status.last()
+            {
+                if let PostAcceptationStatus::Submitted(msg1) = status {
+                    return Err(super::Error::AlreadyInStatus(
+                        PostAcceptationStatus::Submitted(msg1.to_string()),
+                    ));
+                }
             }
 
             post.status.push(super::PostAcceptationData {
@@ -447,7 +380,7 @@ pub async fn get_posts_info(
     ctx: RequirePermissionContext,
     Json(descriptor): Json<GetPostsInfoDescriptor>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if ctx.valid(vec![Permission::View]).unwrap() {
+    if ctx.try_valid(&[Permission::View]).unwrap() {
         let am = account::INSTANCE.inner().read();
         let ar = am
             .get(*account::INSTANCE.index().get(&ctx.account_id).unwrap())
@@ -503,7 +436,7 @@ pub async fn approve_post(
     ctx: RequirePermissionContext,
     Json(descriptor): Json<ApprovePostDescriptor>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if ctx.valid(vec![Permission::Approve]).unwrap() {
+    if ctx.try_valid(&[Permission::Approve]).unwrap() {
         let posts = super::INSTANCE.posts.read();
         if let Some(p) = posts.iter().find(|e| e.read().id == descriptor.post) {
             let mut pw = p.write();

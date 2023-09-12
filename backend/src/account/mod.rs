@@ -20,7 +20,7 @@ pub use sms3rs_shared::account::*;
 pub static INSTANCE: Lazy<AccountManager> = Lazy::new(AccountManager::new);
 
 #[derive(thiserror::Error, Debug)]
-pub enum AccountError {
+pub enum Error {
     #[error("verification code not match")]
     VerificationCode,
     #[error("user has not been verified")]
@@ -39,6 +39,16 @@ pub enum AccountError {
     MailSend(lettre::transport::smtp::Error),
     #[error("permission denied")]
     PermissionDenied,
+}
+
+impl crate::AsResCode for Error {
+    fn response_code(&self) -> hyper::StatusCode {
+        match self {
+            Error::MailSend(_) => hyper::StatusCode::INTERNAL_SERVER_ERROR,
+            Error::UserRegistered => hyper::StatusCode::CONFLICT,
+            _ => hyper::StatusCode::FORBIDDEN,
+        }
+    }
 }
 
 /// Represent an account, including unverified and verified.
@@ -62,9 +72,9 @@ pub enum Account {
 
 impl Account {
     /// Create a new unverified account.
-    pub async fn new(email: lettre::Address) -> Result<Self, AccountError> {
+    pub async fn new(email: lettre::Address) -> Result<Self, Error> {
         if email.domain() != "i.pkuschool.edu.cn" && email.domain() != "pkuschool.edu.cn" {
-            return Err(AccountError::EmailDomainNotInSchool);
+            return Err(Error::EmailDomainNotInSchool);
         }
 
         Ok(Self::Unverified({
@@ -79,7 +89,7 @@ impl Account {
                     .checked_add_signed(Duration::minutes(15))
                 {
                     Some(e) => e,
-                    _ => return Err(AccountError::DateOutOfRange),
+                    _ => return Err(Error::DateOutOfRange),
                 },
             };
             cxt.send_verify();
@@ -88,16 +98,12 @@ impl Account {
     }
 
     /// Verify this account based on the variant.
-    fn verify(
-        &mut self,
-        verify_code: u32,
-        variant: AccountVerifyVariant,
-    ) -> Result<(), AccountError> {
+    fn verify(&mut self, verify_code: u32, variant: AccountVerifyVariant) -> Result<(), Error> {
         match variant {
             AccountVerifyVariant::Activate(attributes) => {
                 if let Self::Unverified(cxt) = self {
                     if cxt.code != verify_code {
-                        return Err(AccountError::VerificationCode);
+                        return Err(Error::VerificationCode);
                     }
                     *self = Self::Verified {
                         id: {
@@ -111,7 +117,7 @@ impl Account {
                     };
                     Ok(())
                 } else {
-                    Err(AccountError::UserRegistered)
+                    Err(Error::UserRegistered)
                 }
             }
             AccountVerifyVariant::ResetPassword(password) => {
@@ -120,10 +126,10 @@ impl Account {
                 } = self
                 {
                     match verify {
-                        UserVerifyVariant::None => Err(AccountError::PermissionDenied),
+                        UserVerifyVariant::None => Err(Error::PermissionDenied),
                         UserVerifyVariant::ForgetPassword(cxt) => {
                             if cxt.code != verify_code {
-                                return Err(AccountError::VerificationCode);
+                                return Err(Error::VerificationCode);
                             }
                             attributes.password_sha = digest(password);
                             *verify = UserVerifyVariant::None;
@@ -131,7 +137,7 @@ impl Account {
                         }
                     }
                 } else {
-                    Err(AccountError::UserUnverified)
+                    Err(Error::UserUnverified)
                 }
             }
         }
@@ -158,7 +164,7 @@ impl Account {
     }
 
     /// Get metadata of this user.
-    pub fn metadata(&self) -> Result<UserMetadata, AccountError> {
+    pub fn metadata(&self) -> Result<UserMetadata, Error> {
         if let Self::Verified { attributes, .. } = self {
             Ok(UserMetadata {
                 email: attributes.email.clone(),
@@ -169,15 +175,17 @@ impl Account {
                 organization: attributes.organization.clone(),
             })
         } else {
-            Err(AccountError::UserUnverified)
+            Err(Error::UserUnverified)
         }
     }
 
     /// Get all permissions this user has.
-    pub fn permissions(&self) -> Permissions {
+    pub fn permissions(&self) -> &[Permission] {
+        const NONE: [Permission; 0] = [];
+
         match self {
-            Account::Unverified(_) => Vec::new(),
-            Account::Verified { attributes, .. } => attributes.permissions.clone(),
+            Account::Unverified(_) => &NONE,
+            Account::Verified { attributes, .. } => &attributes.permissions,
         }
     }
 
@@ -187,9 +195,9 @@ impl Account {
     }
 
     /// Login into the account and return back a token in a `Result`.
-    pub fn login(&mut self, password: &str) -> Result<String, AccountError> {
+    pub fn login(&mut self, password: &str) -> Result<String, Error> {
         match self {
-            Account::Unverified(_) => Err(AccountError::UserUnverified),
+            Account::Unverified(_) => Err(Error::UserUnverified),
             Account::Verified {
                 id,
                 attributes,
@@ -199,21 +207,21 @@ impl Account {
                 if digest(password) == attributes.password_sha {
                     Ok(tokens.new_token(*id, attributes.token_expiration_time))
                 } else {
-                    Err(AccountError::PasswordIncorrect)
+                    Err(Error::PasswordIncorrect)
                 }
             }
         }
     }
 
     /// Logout this account with the target token.
-    pub fn logout(&mut self, token: &str) -> Result<(), AccountError> {
+    pub fn logout(&mut self, token: &str) -> Result<(), Error> {
         match self {
-            Account::Unverified(_) => Err(AccountError::UserUnverified),
+            Account::Unverified(_) => Err(Error::UserUnverified),
             Account::Verified { tokens, .. } => {
                 if tokens.remove(token) {
                     Ok(())
                 } else {
-                    Err(AccountError::TokenIncorrect)
+                    Err(Error::TokenIncorrect)
                 }
             }
         }
@@ -292,11 +300,20 @@ pub struct UserAttributes {
 }
 
 #[derive(thiserror::Error, Debug)]
-pub enum AccountManagerError {
+pub enum ManagerError {
     #[error("account {0} errored: {1}")]
-    Account(u64, AccountError),
+    Account(u64, Error),
     #[error("account {0} not found")]
     AccountNotFound(u64),
+}
+
+impl crate::AsResCode for ManagerError {
+    fn response_code(&self) -> hyper::StatusCode {
+        match self {
+            ManagerError::Account(_, value) => value.response_code(),
+            ManagerError::AccountNotFound(_) => hyper::StatusCode::NOT_FOUND,
+        }
+    }
 }
 
 /// A simple account manager.

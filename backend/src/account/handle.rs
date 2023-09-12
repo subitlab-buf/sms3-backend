@@ -1,4 +1,4 @@
-use super::AccountError;
+use super::Error;
 use super::UserAttributes;
 use super::UserVerifyVariant;
 use crate::account::verify;
@@ -292,7 +292,7 @@ pub async fn view_account(ctx: RequirePermissionContext) -> (StatusCode, Json<Vi
             Json(ViewAccountResult {
                 id: a.id(),
                 metadata: a.metadata().unwrap(),
-                permissions: a.permissions(),
+                permissions: a.permissions().to_vec(),
                 registration_time: attributes.registration_time,
             }),
         ),
@@ -334,12 +334,9 @@ pub async fn edit_account(
     (StatusCode::OK, Json(json!({})))
 }
 
-pub fn apply_edit_variant(
-    mt: AccountEditVariant,
-    account: &mut Account,
-) -> Result<(), AccountError> {
+pub fn apply_edit_variant(mt: AccountEditVariant, account: &mut Account) -> Result<(), Error> {
     match account {
-        Account::Unverified(_) => return Err(AccountError::UserUnverified),
+        Account::Unverified(_) => return Err(Error::UserUnverified),
         Account::Verified { attributes, .. } => match mt {
             AccountEditVariant::Name(name) => attributes.name = name,
             AccountEditVariant::SchoolId(id) => attributes.school_id = id,
@@ -350,7 +347,7 @@ pub fn apply_edit_variant(
                 if attributes.password_sha == digest(old) {
                     attributes.password_sha = digest(new)
                 } else {
-                    return Err(AccountError::PasswordIncorrect);
+                    return Err(Error::PasswordIncorrect);
                 }
             }
             AccountEditVariant::TokenExpireTime(time) => attributes.token_expiration_time = time,
@@ -426,7 +423,7 @@ pub async fn reset_password(
 /// Manage accounts for admins.
 pub mod manage {
     use crate::account::verify::Tokens;
-    use crate::account::{self, AccountError, Permission};
+    use crate::account::{self, Error, Permission};
     use crate::account::{Account, UserAttributes};
     use crate::RequirePermissionContext;
     use axum::http::StatusCode;
@@ -446,7 +443,7 @@ pub mod manage {
         ctx: RequirePermissionContext,
         Json(descriptor): Json<MakeAccountDescriptor>,
     ) -> (StatusCode, Json<serde_json::Value>) {
-        if !ctx.valid(vec![Permission::ManageAccounts]).unwrap() {
+        if !ctx.try_valid(&[Permission::ManageAccounts]).unwrap() {
             return (
                 StatusCode::FORBIDDEN,
                 Json(json!({ "error": "permission denied" })),
@@ -520,7 +517,7 @@ pub mod manage {
         ctx: RequirePermissionContext,
         Json(descriptor): Json<ViewAccountDescriptor>,
     ) -> (StatusCode, Json<serde_json::Value>) {
-        if !ctx.valid(vec![Permission::ViewAccounts]).unwrap() {
+        if !ctx.try_valid(&[Permission::ViewAccounts]).unwrap() {
             return (
                 StatusCode::FORBIDDEN,
                 Json(json!({ "error": "permission denied" })),
@@ -550,7 +547,7 @@ pub mod manage {
                 if let Account::Verified { attributes, .. } = account.deref() {
                     let permissions = account.permissions();
 
-                    if !ctx.valid(permissions.clone()).unwrap() {
+                    if !ctx.try_valid(&permissions).unwrap() {
                         ViewAccountResult::Err {
                             id: account.id(),
                             error: "Permission denied".to_string(),
@@ -559,7 +556,7 @@ pub mod manage {
                         ViewAccountResult::Ok(super::ViewAccountResult {
                             id: *aid,
                             metadata: account.metadata().unwrap(),
-                            permissions,
+                            permissions: permissions.to_vec(),
                             registration_time: attributes.registration_time,
                         })
                     }
@@ -583,7 +580,7 @@ pub mod manage {
         ctx: RequirePermissionContext,
         Json(descriptor): Json<AccountModifyDescriptor>,
     ) -> (StatusCode, Json<serde_json::Value>) {
-        if !ctx.valid(vec![Permission::ManageAccounts]).unwrap() {
+        if !ctx.try_valid(&[Permission::ManageAccounts]).unwrap() {
             return (
                 StatusCode::FORBIDDEN,
                 Json(json!({ "error": "permission denied" })),
@@ -605,7 +602,7 @@ pub mod manage {
             .unwrap()
             .write();
 
-        if !ctx.valid(a.permissions()).unwrap() {
+        if !ctx.try_valid(&a.permissions()).unwrap() {
             return (
                 StatusCode::FORBIDDEN,
                 Json(json!({ "error": "permission denied" })),
@@ -630,9 +627,9 @@ pub mod manage {
         mt: AccountModifyVariant,
         account: &mut Account,
         context: &RequirePermissionContext,
-    ) -> Result<(), AccountError> {
+    ) -> Result<(), Error> {
         match account {
-            Account::Unverified(_) => return Err(AccountError::UserUnverified),
+            Account::Unverified(_) => return Err(Error::UserUnverified),
             Account::Verified { attributes, .. } => match mt {
                 AccountModifyVariant::Name(name) => attributes.name = name,
                 AccountModifyVariant::SchoolId(id) => attributes.school_id = id,
@@ -656,6 +653,7 @@ pub mod manage {
                         .permissions()
                         .into_iter()
                         .filter(|e| permissions.contains(e))
+                        .copied()
                         .collect();
                 }
             },

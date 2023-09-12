@@ -1,7 +1,6 @@
 pub(crate) mod cache;
 pub mod handle;
 
-use image::ImageError;
 use once_cell::sync::Lazy;
 use parking_lot::RwLock;
 
@@ -10,9 +9,27 @@ pub use sms3rs_shared::post::*;
 pub static INSTANCE: Lazy<PostManager> = Lazy::new(PostManager::new);
 
 #[derive(thiserror::Error, Debug)]
-pub enum PostError {
-    #[error("image error: {0}")]
-    Image(ImageError),
+pub enum Error {
+    #[error("cache error: {0}")]
+    Cache(cache::Error),
+    #[error("post id conflicted")]
+    Conflict,
+    #[error("post lifetime out of range (longest: 7 days)")]
+    DateOutOfRange,
+    #[error("post not found")]
+    NotFound,
+    #[error("post already in status: {0:?}")]
+    AlreadyInStatus(PostAcceptationStatus),
+}
+
+impl crate::AsResCode for Error {
+    fn response_code(&self) -> hyper::StatusCode {
+        match self {
+            Error::Cache(err) => err.response_code(),
+            Error::Conflict => hyper::StatusCode::CONFLICT,
+            _ => hyper::StatusCode::FORBIDDEN,
+        }
+    }
 }
 
 pub fn save_post(_post: &Post) {

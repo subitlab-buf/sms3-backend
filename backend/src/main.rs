@@ -6,8 +6,8 @@ mod post;
 #[cfg(test)]
 mod tests;
 
-use account::{AccountManagerError, Permissions};
-use axum::{async_trait, http::StatusCode, routing::post};
+use axum::{async_trait, http::StatusCode, response::IntoResponse, routing::post};
+use sms3rs_shared::account::Permission;
 use std::ops::Deref;
 
 #[tokio::main]
@@ -78,28 +78,41 @@ pub struct RequirePermissionContext {
 }
 
 impl RequirePermissionContext {
+    pub fn valid(&self, permissions: &[Permission]) -> Result<(), account::ManagerError> {
+        match self.try_valid(permissions) {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(account::ManagerError::Account(
+                self.account_id,
+                account::Error::PermissionDenied,
+            )),
+            Err(err) => Err(err),
+        }
+    }
+
     /// Indicates whether this context's token and permissions is valid.
-    pub fn valid(&self, permissions: Permissions) -> Result<bool, AccountManagerError> {
-        match account::INSTANCE
+    pub fn try_valid(&self, permissions: &[Permission]) -> Result<bool, account::ManagerError> {
+        if let Some(index) = account::INSTANCE
             .index()
             .get(&self.account_id)
             .map(|e| *e.value())
         {
-            Some(index) => {
-                account::INSTANCE.refresh(self.account_id);
-                let b = account::INSTANCE.inner().read();
-                let account = b.get(index).unwrap().read();
-                Ok(match account.deref() {
-                    account::Account::Unverified(_) => {
-                        return Err(AccountManagerError::Account(
-                            self.account_id,
-                            account::AccountError::UserUnverified,
-                        ))
-                    }
-                    account::Account::Verified { tokens, .. } => tokens.token_usable(&self.token),
-                } && permissions.iter().all(|p| account.has_permission(*p)))
-            }
-            None => Err(AccountManagerError::AccountNotFound(self.account_id)),
+            account::INSTANCE.refresh(self.account_id);
+
+            let b = account::INSTANCE.inner().read();
+            let account = b.get(index).unwrap().read();
+
+            Ok(
+                if let account::Account::Verified { tokens, .. } = account.deref() {
+                    tokens.token_usable(&self.token)
+                } else {
+                    return Err(account::ManagerError::Account(
+                        self.account_id,
+                        account::Error::UserUnverified,
+                    ));
+                } && permissions.iter().all(|p| account.has_permission(*p)),
+            )
+        } else {
+            Err(account::ManagerError::AccountNotFound(self.account_id))
         }
     }
 }
@@ -141,7 +154,7 @@ impl<S> axum::extract::FromRequestParts<S> for RequirePermissionContext {
             },
         };
 
-        if !this.valid(vec![]).unwrap_or_default() {
+        if !this.try_valid(&[]).unwrap_or_default() {
             return Err((
                 StatusCode::FORBIDDEN,
                 axum::Json(serde_json::json!({ "error": "permission denied" })),
@@ -149,5 +162,35 @@ impl<S> axum::extract::FromRequestParts<S> for RequirePermissionContext {
         }
 
         Ok(this)
+    }
+}
+
+trait AsResCode: std::error::Error {
+    fn response_code(&self) -> StatusCode;
+}
+
+struct ResError<T>(pub T)
+where
+    T: AsResCode;
+
+impl<T> IntoResponse for ResError<T>
+where
+    T: AsResCode,
+{
+    fn into_response(self) -> axum::response::Response {
+        (
+            self.0.response_code(),
+            axum::Json(serde_json::json!({ "error": self.0.to_string() })),
+        )
+            .into_response()
+    }
+}
+
+impl AsResCode for std::io::Error {
+    fn response_code(&self) -> StatusCode {
+        match self.kind() {
+            std::io::ErrorKind::NotFound => hyper::StatusCode::NOT_FOUND,
+            _ => hyper::StatusCode::INTERNAL_SERVER_ERROR,
+        }
     }
 }

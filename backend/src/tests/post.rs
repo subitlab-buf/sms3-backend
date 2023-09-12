@@ -153,7 +153,7 @@ async fn new() {
 
     assert!(crate::post::cache::INSTANCE.caches.read()[0]
         .blocked
-        .load(std::sync::atomic::Ordering::Relaxed));
+        .load(std::sync::atomic::Ordering::Acquire));
 
     assert!(!crate::post::INSTANCE.posts.read().is_empty());
 }

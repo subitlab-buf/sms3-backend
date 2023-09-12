@@ -195,7 +195,7 @@ async fn login() {
         account_id,
     };
 
-    assert!(cxt.valid(vec![]).unwrap());
+    assert!(cxt.try_valid(&[]).unwrap());
 }
 
 /// Test for usage of `RequirePermissionContext`.
@@ -237,10 +237,10 @@ fn require_permission_context() {
             account_id,
         };
 
-        assert!(cxt.valid(vec![]).unwrap());
+        assert!(cxt.try_valid(&[]).unwrap());
 
         assert!(!cxt
-            .valid(vec![sms3rs_shared::account::Permission::Op])
+            .try_valid(&[sms3rs_shared::account::Permission::Op])
             .unwrap());
 
         let ctx_wrong = crate::RequirePermissionContext {
@@ -248,7 +248,7 @@ fn require_permission_context() {
             account_id,
         };
 
-        assert!(!ctx_wrong.valid(vec![]).unwrap());
+        assert!(!ctx_wrong.try_valid(&[]).unwrap());
     }
 
     {
@@ -265,7 +265,7 @@ fn require_permission_context() {
             account_id,
         };
 
-        assert!(!ctx.valid(vec![]).unwrap_or(true));
+        assert!(!ctx.try_valid(&[]).unwrap_or(true));
     }
 }
 
@@ -325,7 +325,7 @@ async fn logout() {
         account_id,
     };
 
-    assert!(!ctx.valid(vec![]).unwrap());
+    assert!(!ctx.try_valid(&[]).unwrap());
 }
 
 #[serial]

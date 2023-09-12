@@ -1,4 +1,4 @@
-use super::PostError;
+use hyper::StatusCode;
 use image::DynamicImage;
 use once_cell::sync::Lazy;
 use parking_lot::RwLock;
@@ -11,6 +11,26 @@ use std::{
 };
 
 pub static INSTANCE: Lazy<CacheManager> = Lazy::new(CacheManager::new);
+
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("image error: {0}")]
+    Image(image::ImageError),
+    #[error("image too large: {0} bytes, max 50MB")]
+    ImgTooLarge(usize),
+    #[error("cache not found")]
+    NotFound,
+}
+
+impl crate::AsResCode for Error {
+    fn response_code(&self) -> StatusCode {
+        match self {
+            Error::Image(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Error::ImgTooLarge(_) => StatusCode::PAYLOAD_TOO_LARGE,
+            Error::NotFound => StatusCode::NOT_FOUND,
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 pub struct PostImageCache {
@@ -26,8 +46,15 @@ pub struct PostImageCache {
 
 impl PostImageCache {
     /// Create a new cache and its hash from image bytes.
-    pub fn new(bytes: &Vec<u8>, uploader: u64) -> Result<(Self, u64), PostError> {
-        let image = image::load_from_memory(bytes).map_err(PostError::Image)?;
+    pub fn new(bytes: &[u8], uploader: u64) -> Result<Self, Error> {
+        {
+            let len = bytes.len();
+            if len > 50_000_000 {
+                return Err(Error::ImgTooLarge(len));
+            }
+        }
+
+        let image = image::load_from_memory(bytes).map_err(Error::Image)?;
 
         let hash = {
             let mut hasher = DefaultHasher::new();
@@ -35,15 +62,12 @@ impl PostImageCache {
             hasher.finish()
         };
 
-        Ok((
-            Self {
-                hash,
-                uploader,
-                blocked: AtomicBool::new(false),
-                img: RwLock::new(Some(image)),
-            },
+        Ok(Self {
             hash,
-        ))
+            uploader,
+            blocked: AtomicBool::new(false),
+            img: RwLock::new(Some(image)),
+        })
     }
 
     fn save(&self) {
@@ -138,7 +162,7 @@ impl CacheManager {
             <= cr
                 .iter()
                 .map(|c| {
-                    if c.blocked.load(Ordering::Relaxed) {
+                    if c.blocked.load(Ordering::Acquire) {
                         0
                     } else {
                         1
@@ -148,7 +172,7 @@ impl CacheManager {
         {
             let mut i = 0;
             for e in cr.iter().enumerate() {
-                if !e.1.blocked.load(Ordering::Relaxed) {
+                if !e.1.blocked.load(Ordering::Acquire) {
                     let _ = std::fs::remove_file(format!("./data/images/{}.png", e.1.hash));
                     i = e.0;
                     break;

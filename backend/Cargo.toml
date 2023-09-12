@@ -28,6 +28,7 @@ parking_lot = "*"
 dashmap = "*"
 mime = "*"
 thiserror = "*"
+hyper = { version = "*", default-features = false }
 
 [dev-dependencies]
 serial_test = "*"
