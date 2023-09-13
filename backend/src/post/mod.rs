@@ -1,34 +1,43 @@
 pub(crate) mod cache;
 pub mod handle;
 
-use image::ImageError;
 use once_cell::sync::Lazy;
 use parking_lot::RwLock;
-use std::{error::Error, fmt::Display};
 
 pub use sms3rs_shared::post::*;
 
 pub static INSTANCE: Lazy<PostManager> = Lazy::new(PostManager::new);
 
-#[derive(Debug)]
-pub enum PostError {
-    ImageError(ImageError),
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("cache error: {0}")]
+    Cache(cache::Error),
+    #[error("post id conflicted")]
+    Conflict,
+    #[error("post lifetime out of range (longest: 7 days)")]
+    DateOutOfRange,
+    #[error("post not found")]
+    NotFound,
+    #[error("post already in status: {0:?}")]
+    Already(PostAcceptationStatus),
+    #[error("status update message couldn't be empty")]
+    MsgEmpty,
 }
 
-impl Display for PostError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl crate::AsResCode for Error {
+    fn response_code(&self) -> hyper::StatusCode {
         match self {
-            PostError::ImageError(err) => err.fmt(f),
+            Error::Cache(err) => err.response_code(),
+            Error::Conflict => hyper::StatusCode::CONFLICT,
+            _ => hyper::StatusCode::FORBIDDEN,
         }
     }
 }
 
-impl Error for PostError {}
-
-pub fn save_post(post: &Post) {
+pub fn save_post(_post: &Post) {
     #[cfg(not(test))]
     {
-        let this = post.clone();
+        let this = _post.clone();
 
         tokio::spawn(async move {
             use tokio::io::AsyncWriteExt;
@@ -44,10 +53,10 @@ pub fn save_post(post: &Post) {
     };
 }
 
-pub fn remove_post(post: &Post) {
+pub fn remove_post(_post: &Post) {
     #[cfg(not(test))]
     {
-        let id = post.id;
+        let id = _post.id;
 
         tokio::spawn(async move {
             tokio::fs::remove_file(format!("./data/posts/{}.toml", id))

@@ -1,7 +1,6 @@
 pub mod handle;
 
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
 
 /// Represents a post posted by a user.
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -13,15 +12,17 @@ pub struct Post {
     pub metadata: PostMetadata,
     /// The requester of this post in user id.
     pub publisher: u64,
-    /// The status of this post (including history status inside a deque).
-    /// Newer status will be pushed to back of the deque.
-    pub status: VecDeque<PostAcceptationData>,
+    /// The status of this post (including history
+    /// status inside a vector).
+    /// Newer status will be pushed to back of the vector.
+    pub status: Vec<PostAcceptationData>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PostMetadata {
     pub title: String,
-    /// Description of this post, should be secret to users except admins and publisher.
+    /// Description of this post, should be secret
+    /// to users except admins and publisher.
     pub description: String,
     /// Time range to display of this post.
     pub time_range: (chrono::NaiveDate, chrono::NaiveDate),
@@ -44,8 +45,10 @@ pub enum PostAcceptationStatus {
     /// The post is pending to be submitted,
     /// admins are not able to accept it.
     Pending,
-    /// The post was rejected by an admin with a message.
+    /// The post was rejected by an admin
+    /// with a message.
     Rejected(String),
-    /// The post was submitted with a message for admins by publisher.
+    /// The post was submitted with a message
+    /// for admins by publisher.
     Submitted(String),
 }

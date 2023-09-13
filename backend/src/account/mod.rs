@@ -10,7 +10,6 @@ use serde::{Deserialize, Serialize};
 use sha256::digest;
 use std::{
     collections::hash_map::DefaultHasher,
-    fmt::Display,
     hash::{Hash, Hasher},
     ops::{Deref, DerefMut},
 };
@@ -20,50 +19,39 @@ pub use sms3rs_shared::account::*;
 /// The static instance of accounts.
 pub static INSTANCE: Lazy<AccountManager> = Lazy::new(AccountManager::new);
 
-#[derive(Debug, Serialize, Deserialize)]
-pub enum AccountError {
-    /// Verification code not match.
-    VerificationCodeError,
-    /// User has not been verified.
-    UserUnverifiedError,
-    /// User already registered.
-    UserRegisteredError,
-    /// The target password is not correct.
-    PasswordIncorrectError,
-    /// The target token is not correct.
-    TokenIncorrectError,
-    /// The email address's domain is not from PKUSchool.
-    EmailDomainNotInSchoolError,
-    /// Date out of range.
-    DateOutOfRangeError,
-    /// An SMTP error.
-    MailSendError(String),
-    /// Permission denied.
-    PermissionDeniedError,
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("verification code not match")]
+    VerificationCode,
+    #[error("user has not been verified")]
+    UserUnverified,
+    #[error("user already registered")]
+    UserRegistered,
+    #[error("password incorrect")]
+    PasswordIncorrect,
+    #[error("token incorrect")]
+    TokenIncorrect,
+    #[error("domain of email address is not from PKUSchool")]
+    EmailDomainNotInSchool,
+    #[error("date out of range")]
+    DateOutOfRange,
+    #[error("smtp error while sending verification mail: {0}")]
+    MailSend(lettre::transport::smtp::Error),
+    #[error("permission denied")]
+    PermissionDenied,
+    #[error("user with same id already exists")]
+    Conflict,
 }
 
-impl Display for AccountError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl crate::AsResCode for Error {
+    fn response_code(&self) -> hyper::StatusCode {
         match self {
-            AccountError::VerificationCodeError => f.write_str("Verification code not match"),
-            AccountError::UserUnverifiedError => f.write_str("User has not been verified"),
-            AccountError::UserRegisteredError => f.write_str("User already registered"),
-            AccountError::PasswordIncorrectError => f.write_str("The password is not correct"),
-            AccountError::TokenIncorrectError => f.write_str("The target token is not correct"),
-            AccountError::EmailDomainNotInSchoolError => {
-                f.write_str("The email address's domain is not from PKUSchool")
-            }
-            AccountError::DateOutOfRangeError => f.write_str("Date out of range"),
-            AccountError::MailSendError(err) => {
-                f.write_str("SMPT error while sending verification mail: ")?;
-                f.write_str(err)
-            }
-            AccountError::PermissionDeniedError => f.write_str("Permission denied"),
+            Error::MailSend(_) => hyper::StatusCode::INTERNAL_SERVER_ERROR,
+            Error::Conflict => hyper::StatusCode::CONFLICT,
+            _ => hyper::StatusCode::FORBIDDEN,
         }
     }
 }
-
-impl std::error::Error for AccountError {}
 
 /// Represent an account, including unverified and verified.
 #[derive(Serialize, Deserialize, Debug)]
@@ -86,41 +74,44 @@ pub enum Account {
 
 impl Account {
     /// Create a new unverified account.
-    pub async fn new(email: lettre::Address) -> Result<Self, AccountError> {
-        if email.domain() != "i.pkuschool.edu.cn" && email.domain() != "pkuschool.edu.cn" {
-            return Err(AccountError::EmailDomainNotInSchoolError);
+    pub fn new(email: lettre::Address) -> Result<Self, Error> {
+        static DOMAINS: once_cell::sync::Lazy<std::collections::HashSet<String>> =
+            once_cell::sync::Lazy::new(|| {
+                let mut set = std::collections::HashSet::new();
+
+                set.insert("i.pkuschool.edu.cn".to_string());
+                set.insert("pkuschool.edu.cn".to_string());
+
+                set
+            });
+
+        if !DOMAINS.contains(email.domain()) {
+            return Err(Error::EmailDomainNotInSchool);
         }
+
         Ok(Self::Unverified({
-            let cxt = verify::Context {
+            let ctx = verify::Context {
                 email,
                 code: {
                     let mut rng = rand::thread_rng();
                     rng.gen_range(100000..999999)
                 },
-                expire_time: match Utc::now()
-                    .naive_utc()
-                    .checked_add_signed(Duration::minutes(15))
-                {
-                    Some(e) => e,
-                    _ => return Err(AccountError::DateOutOfRangeError),
-                },
+                expire_time: Utc::now().naive_utc() + Duration::minutes(15),
             };
-            cxt.send_verify();
-            cxt
+
+            ctx.send_verify();
+
+            ctx
         }))
     }
 
     /// Verify this account based on the variant.
-    fn verify(
-        &mut self,
-        verify_code: u32,
-        variant: AccountVerifyVariant,
-    ) -> Result<(), AccountError> {
+    fn verify(&mut self, verify_code: u32, variant: AccountVerifyVariant) -> Result<(), Error> {
         match variant {
             AccountVerifyVariant::Activate(attributes) => {
                 if let Self::Unverified(cxt) = self {
                     if cxt.code != verify_code {
-                        return Err(AccountError::VerificationCodeError);
+                        return Err(Error::VerificationCode);
                     }
                     *self = Self::Verified {
                         id: {
@@ -134,7 +125,7 @@ impl Account {
                     };
                     Ok(())
                 } else {
-                    Err(AccountError::UserRegisteredError)
+                    Err(Error::UserRegistered)
                 }
             }
             AccountVerifyVariant::ResetPassword(password) => {
@@ -143,10 +134,10 @@ impl Account {
                 } = self
                 {
                     match verify {
-                        UserVerifyVariant::None => Err(AccountError::PermissionDeniedError),
+                        UserVerifyVariant::None => Err(Error::PermissionDenied),
                         UserVerifyVariant::ForgetPassword(cxt) => {
                             if cxt.code != verify_code {
-                                return Err(AccountError::VerificationCodeError);
+                                return Err(Error::VerificationCode);
                             }
                             attributes.password_sha = digest(password);
                             *verify = UserVerifyVariant::None;
@@ -154,7 +145,7 @@ impl Account {
                         }
                     }
                 } else {
-                    Err(AccountError::UserUnverifiedError)
+                    Err(Error::UserUnverified)
                 }
             }
         }
@@ -181,7 +172,7 @@ impl Account {
     }
 
     /// Get metadata of this user.
-    pub fn metadata(&self) -> Result<UserMetadata, AccountError> {
+    pub fn metadata(&self) -> Result<UserMetadata, Error> {
         if let Self::Verified { attributes, .. } = self {
             Ok(UserMetadata {
                 email: attributes.email.clone(),
@@ -192,15 +183,17 @@ impl Account {
                 organization: attributes.organization.clone(),
             })
         } else {
-            Err(AccountError::UserUnverifiedError)
+            Err(Error::UserUnverified)
         }
     }
 
     /// Get all permissions this user has.
-    pub fn permissions(&self) -> Permissions {
+    pub fn permissions(&self) -> &[Permission] {
+        const NONE: [Permission; 0] = [];
+
         match self {
-            Account::Unverified(_) => Vec::new(),
-            Account::Verified { attributes, .. } => attributes.permissions.clone(),
+            Account::Unverified(_) => &NONE,
+            Account::Verified { attributes, .. } => &attributes.permissions,
         }
     }
 
@@ -210,9 +203,9 @@ impl Account {
     }
 
     /// Login into the account and return back a token in a `Result`.
-    pub fn login(&mut self, password: &str) -> Result<String, AccountError> {
+    pub fn login(&mut self, password: &str) -> Result<String, Error> {
         match self {
-            Account::Unverified(_) => Err(AccountError::UserUnverifiedError),
+            Account::Unverified(_) => Err(Error::UserUnverified),
             Account::Verified {
                 id,
                 attributes,
@@ -222,21 +215,21 @@ impl Account {
                 if digest(password) == attributes.password_sha {
                     Ok(tokens.new_token(*id, attributes.token_expiration_time))
                 } else {
-                    Err(AccountError::PasswordIncorrectError)
+                    Err(Error::PasswordIncorrect)
                 }
             }
         }
     }
 
     /// Logout this account with the target token.
-    pub fn logout(&mut self, token: &str) -> Result<(), AccountError> {
+    pub fn logout(&mut self, token: &str) -> Result<(), Error> {
         match self {
-            Account::Unverified(_) => Err(AccountError::UserUnverifiedError),
+            Account::Unverified(_) => Err(Error::UserUnverified),
             Account::Verified { tokens, .. } => {
                 if tokens.remove(token) {
                     Ok(())
                 } else {
-                    Err(AccountError::TokenIncorrectError)
+                    Err(Error::TokenIncorrect)
                 }
             }
         }
@@ -314,31 +307,22 @@ pub struct UserAttributes {
     pub token_expiration_time: u16,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub enum AccountManagerError {
-    Account(u64, AccountError),
-    AccountNotFound(u64),
+#[derive(thiserror::Error, Debug)]
+pub enum ManagerError {
+    #[error("account {0} errored: {1}")]
+    Account(u64, Error),
+    #[error("account {0} not found")]
+    NotFound(u64),
 }
 
-impl Display for AccountManagerError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl crate::AsResCode for ManagerError {
+    fn response_code(&self) -> hyper::StatusCode {
         match self {
-            AccountManagerError::Account(id, e) => {
-                f.write_str("Account ")?;
-                id.fmt(f)?;
-                f.write_str(" Errored: ")?;
-                e.fmt(f)
-            }
-            AccountManagerError::AccountNotFound(id) => {
-                f.write_str("Account ")?;
-                id.fmt(f)?;
-                f.write_str(" not found")
-            }
+            ManagerError::Account(_, value) => value.response_code(),
+            ManagerError::NotFound(_) => hyper::StatusCode::NOT_FOUND,
         }
     }
 }
-
-impl std::error::Error for AccountManagerError {}
 
 /// A simple account manager.
 pub struct AccountManager {

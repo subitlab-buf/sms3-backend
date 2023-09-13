@@ -415,7 +415,7 @@ async fn modify() {
                 Some(sms3rs_shared::account::House::ZhengXin)
             );
             assert_eq!(attributes.organization, Some("SubIT".to_string()));
-            assert_eq!(attributes.permissions, vec![Permission::ManageAccounts]);
+            assert_eq!(attributes.permissions, &[Permission::ManageAccounts]);
         } else {
             unreachable!()
         }

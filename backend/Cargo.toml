@@ -23,12 +23,12 @@ serde_json = "*"
 toml = "0.7"
 sha256 = "*"
 image = "0.24"
-sms3rs-shared = { version = "*", path = "../sms3rs-shared" }
-anyhow = "*"
+sms3rs-shared = { version = "*", path = "../shared" }
 parking_lot = "*"
-hashbrown = "*"
 dashmap = "*"
 mime = "*"
+thiserror = "*"
+hyper = { version = "*", default-features = false }
 
 [dev-dependencies]
 serial_test = "*"
