@@ -19,7 +19,9 @@ pub enum Error {
     #[error("post not found")]
     NotFound,
     #[error("post already in status: {0:?}")]
-    AlreadyInStatus(PostAcceptationStatus),
+    Already(PostAcceptationStatus),
+    #[error("status update message couldn't be empty")]
+    MsgEmpty,
 }
 
 impl crate::AsResCode for Error {

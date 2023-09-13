@@ -112,7 +112,7 @@ impl RequirePermissionContext {
                 } && permissions.iter().all(|p| account.has_permission(*p)),
             )
         } else {
-            Err(account::ManagerError::AccountNotFound(self.account_id))
+            Err(account::ManagerError::NotFound(self.account_id))
         }
     }
 }

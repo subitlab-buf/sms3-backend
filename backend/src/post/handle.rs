@@ -7,7 +7,6 @@ use crate::post::cache::PostImageCache;
 use crate::RequirePermissionContext;
 use crate::ResError;
 use axum::body::Bytes;
-use axum::http::StatusCode;
 use axum::Json;
 use chrono::Days;
 use chrono::Utc;
@@ -24,12 +23,10 @@ use sms3rs_shared::post::handle::*;
 pub async fn cache_image(
     (ctx, bytes): (RequirePermissionContext, Bytes),
 ) -> axum::response::Result<Json<serde_json::Value>> {
-    ctx.valid(&[Permission::Post])
-        .map_err(|err| ResError(err))?;
+    ctx.valid(&[Permission::Post]).map_err(ResError)?;
 
-    let cache = PostImageCache::new(&bytes, ctx.account_id).map_err(|err| ResError(err))?;
+    let cache = PostImageCache::new(&bytes, ctx.account_id).map_err(ResError)?;
     let id = cache.hash;
-
     super::cache::INSTANCE.push(cache);
 
     Ok(Json(json!({ "hash": id })))
@@ -256,16 +253,19 @@ fn apply_edit_post_variant(
 
         EditPostVariant::Images(imgs) => {
             let cache = super::cache::INSTANCE.caches.read();
+
             for img_id in post.images.iter() {
                 if let Some(e) = cache.iter().find(|e| e.hash == *img_id) {
                     e.blocked.store(false, atomic::Ordering::Release)
                 }
             }
+
             for img_id in imgs.iter() {
                 if !cache.iter().any(|e| e.hash == *img_id) {
                     return Err(super::Error::Cache(super::cache::Error::NotFound));
                 }
             }
+
             for img_id in imgs.iter() {
                 let mut unlock = true;
                 for e in super::INSTANCE.posts.read().iter() {
@@ -304,9 +304,7 @@ fn apply_edit_post_variant(
                 .last()
                 .map_or(true, |e| matches!(e.status, PostAcceptationStatus::Pending))
             {
-                return Err(super::Error::AlreadyInStatus(
-                    PostAcceptationStatus::Pending,
-                ));
+                return Err(super::Error::Already(PostAcceptationStatus::Pending));
             }
 
             post.status.push(super::PostAcceptationData {
@@ -359,9 +357,9 @@ fn apply_edit_post_variant(
                 post.status.last()
             {
                 if let PostAcceptationStatus::Submitted(msg1) = status {
-                    return Err(super::Error::AlreadyInStatus(
-                        PostAcceptationStatus::Submitted(msg1.to_string()),
-                    ));
+                    return Err(super::Error::Already(PostAcceptationStatus::Submitted(
+                        msg1.to_string(),
+                    )));
                 }
             }
 
@@ -379,126 +377,117 @@ fn apply_edit_post_variant(
 pub async fn get_posts_info(
     ctx: RequirePermissionContext,
     Json(descriptor): Json<GetPostsInfoDescriptor>,
-) -> (StatusCode, Json<serde_json::Value>) {
-    if ctx.try_valid(&[Permission::View]).unwrap() {
-        let am = account::INSTANCE.inner().read();
-        let ar = am
-            .get(*account::INSTANCE.index().get(&ctx.account_id).unwrap())
-            .unwrap()
-            .read();
+) -> axum::response::Result<Json<serde_json::Value>> {
+    ctx.valid(&[Permission::View]).map_err(ResError)?;
 
-        let mut results = Vec::new();
-        let posts = super::INSTANCE.posts.read();
-        let date = Utc::now().date_naive();
+    let am = account::INSTANCE.inner().read();
+    let ar = am
+        .get(*account::INSTANCE.index().get(&ctx.account_id).unwrap())
+        .unwrap()
+        .read();
 
-        for p in descriptor.posts.iter() {
-            let mut ps = false;
+    let mut results = Vec::new();
+    let posts = super::INSTANCE.posts.read();
+    let date = Utc::now().date_naive();
 
-            for e in posts.iter() {
-                let er = e.read();
+    for p in descriptor.posts.iter() {
+        let mut ps = false;
 
-                if er.id == *p {
-                    if er.publisher == ctx.account_id || ar.has_permission(Permission::Check) {
-                        results.push(GetPostInfoResult::Full(er.clone()))
-                    } else if er.metadata.time_range.0 <= date
-                        && ar.has_permission(Permission::View)
-                    {
-                        results.push(GetPostInfoResult::Foreign {
-                            id: er.id,
-                            images: er.images.clone(),
-                            title: er.metadata.title.clone(),
-                            archived: er.metadata.time_range.1 < date,
-                        })
-                    } else {
-                        results.push(GetPostInfoResult::NotFound(er.id))
-                    }
+        for e in posts.iter() {
+            let er = e.read();
 
-                    ps = true;
-                    break;
+            if er.id == *p {
+                if er.publisher == ctx.account_id || ar.has_permission(Permission::Check) {
+                    results.push(GetPostInfoResult::Full(er.clone()))
+                } else if er.metadata.time_range.0 <= date && ar.has_permission(Permission::View) {
+                    results.push(GetPostInfoResult::Foreign {
+                        id: er.id,
+                        images: er.images.clone(),
+                        title: er.metadata.title.clone(),
+                        archived: er.metadata.time_range.1 < date,
+                    })
+                } else {
+                    results.push(GetPostInfoResult::NotFound(er.id))
                 }
-            }
 
-            if !ps {
-                results.push(GetPostInfoResult::NotFound(*p))
+                ps = true;
+                break;
             }
         }
 
-        (StatusCode::OK, Json(json!({ "results": results })))
-    } else {
-        (
-            StatusCode::FORBIDDEN,
-            Json(json!({ "error": "permission denied" })),
-        )
+        if !ps {
+            results.push(GetPostInfoResult::NotFound(*p))
+        }
     }
+
+    Ok(Json(json!({ "results": results })))
 }
 
 pub async fn approve_post(
     ctx: RequirePermissionContext,
     Json(descriptor): Json<ApprovePostDescriptor>,
-) -> (StatusCode, Json<serde_json::Value>) {
-    if ctx.try_valid(&[Permission::Approve]).unwrap() {
-        let posts = super::INSTANCE.posts.read();
-        if let Some(p) = posts.iter().find(|e| e.read().id == descriptor.post) {
-            let mut pw = p.write();
-            match descriptor.variant {
-                ApprovePostVariant::Accept(msg) => {
-                    if pw.status.last().map_or(false, |e| {
-                        matches!(e.status, PostAcceptationStatus::Accepted(_))
-                    }) {
-                        return (
-                            StatusCode::FORBIDDEN,
-                            Json(json!({ "error": "target post has already been accepted" })),
-                        );
-                    }
+) -> axum::response::Result<()> {
+    ctx.valid(&[Permission::Approve]).map_err(ResError)?;
 
-                    pw.status.push(super::PostAcceptationData {
-                        operator: ctx.account_id,
-                        status: PostAcceptationStatus::Accepted(msg.unwrap_or_default()),
-                        time: Utc::now(),
-                    });
+    if let Some(p) = super::INSTANCE
+        .posts
+        .read()
+        .iter()
+        .find(|e| e.read().id == descriptor.post)
+    {
+        let mut pw = p.write();
+
+        match descriptor.variant {
+            ApprovePostVariant::Accept(msg) => {
+                if let Some(sms3rs_shared::post::PostAcceptationData { status, .. }) =
+                    pw.status.last()
+                {
+                    if let PostAcceptationStatus::Accepted(msg) = status {
+                        return Err(ResError(super::Error::Already(
+                            PostAcceptationStatus::Accepted(msg.to_string()),
+                        ))
+                        .into());
+                    }
                 }
 
-                ApprovePostVariant::Reject(msg) => {
-                    if pw.status.last().map_or(false, |e| {
-                        matches!(e.status, PostAcceptationStatus::Rejected(_))
-                    }) {
-                        return (
-                            StatusCode::FORBIDDEN,
-                            Json(json!({ "error": "target post has already been rejected" })),
-                        );
+                pw.status.push(super::PostAcceptationData {
+                    operator: ctx.account_id,
+                    status: PostAcceptationStatus::Accepted(msg.unwrap_or_default()),
+                    time: Utc::now(),
+                });
+            }
+
+            ApprovePostVariant::Reject(msg) => {
+                if let Some(sms3rs_shared::post::PostAcceptationData { status, .. }) =
+                    pw.status.last()
+                {
+                    if let PostAcceptationStatus::Rejected(msg) = status {
+                        return Err(ResError(super::Error::Already(
+                            PostAcceptationStatus::Rejected(msg.to_string()),
+                        ))
+                        .into());
                     }
-
-                    pw.status.push(super::PostAcceptationData {
-                        operator: ctx.account_id,
-
-                        status: PostAcceptationStatus::Rejected({
-                            if msg.is_empty() {
-                                return (
-                                    StatusCode::FORBIDDEN,
-                                    Json(json!({ "error": "message body could not be empty" })),
-                                );
-                            }
-
-                            msg
-                        }),
-
-                        time: Utc::now(),
-                    });
                 }
-            };
 
-            super::save_post(pw.deref());
-            return (StatusCode::OK, Json(json!({})));
-        }
+                pw.status.push(super::PostAcceptationData {
+                    operator: ctx.account_id,
 
-        (
-            StatusCode::NOT_FOUND,
-            Json(json!({ "error": "target post not found" })),
-        )
-    } else {
-        (
-            StatusCode::FORBIDDEN,
-            Json(json!({ "error": "permission denied" })),
-        )
+                    status: PostAcceptationStatus::Rejected({
+                        if msg.is_empty() {
+                            return Err(ResError(super::Error::MsgEmpty).into());
+                        }
+
+                        msg
+                    }),
+
+                    time: Utc::now(),
+                });
+            }
+        };
+
+        super::save_post(pw.deref());
+        return Ok(());
     }
+
+    Err(ResError(super::Error::NotFound).into())
 }

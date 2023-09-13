@@ -39,13 +39,15 @@ pub enum Error {
     MailSend(lettre::transport::smtp::Error),
     #[error("permission denied")]
     PermissionDenied,
+    #[error("user with same id already exists")]
+    Conflict,
 }
 
 impl crate::AsResCode for Error {
     fn response_code(&self) -> hyper::StatusCode {
         match self {
             Error::MailSend(_) => hyper::StatusCode::INTERNAL_SERVER_ERROR,
-            Error::UserRegistered => hyper::StatusCode::CONFLICT,
+            Error::Conflict => hyper::StatusCode::CONFLICT,
             _ => hyper::StatusCode::FORBIDDEN,
         }
     }
@@ -72,28 +74,34 @@ pub enum Account {
 
 impl Account {
     /// Create a new unverified account.
-    pub async fn new(email: lettre::Address) -> Result<Self, Error> {
-        if email.domain() != "i.pkuschool.edu.cn" && email.domain() != "pkuschool.edu.cn" {
+    pub fn new(email: lettre::Address) -> Result<Self, Error> {
+        static DOMAINS: once_cell::sync::Lazy<std::collections::HashSet<String>> =
+            once_cell::sync::Lazy::new(|| {
+                let mut set = std::collections::HashSet::new();
+
+                set.insert("i.pkuschool.edu.cn".to_string());
+                set.insert("pkuschool.edu.cn".to_string());
+
+                set
+            });
+
+        if !DOMAINS.contains(email.domain()) {
             return Err(Error::EmailDomainNotInSchool);
         }
 
         Ok(Self::Unverified({
-            let cxt = verify::Context {
+            let ctx = verify::Context {
                 email,
                 code: {
                     let mut rng = rand::thread_rng();
                     rng.gen_range(100000..999999)
                 },
-                expire_time: match Utc::now()
-                    .naive_utc()
-                    .checked_add_signed(Duration::minutes(15))
-                {
-                    Some(e) => e,
-                    _ => return Err(Error::DateOutOfRange),
-                },
+                expire_time: Utc::now().naive_utc() + Duration::minutes(15),
             };
-            cxt.send_verify();
-            cxt
+
+            ctx.send_verify();
+
+            ctx
         }))
     }
 
@@ -304,14 +312,14 @@ pub enum ManagerError {
     #[error("account {0} errored: {1}")]
     Account(u64, Error),
     #[error("account {0} not found")]
-    AccountNotFound(u64),
+    NotFound(u64),
 }
 
 impl crate::AsResCode for ManagerError {
     fn response_code(&self) -> hyper::StatusCode {
         match self {
             ManagerError::Account(_, value) => value.response_code(),
-            ManagerError::AccountNotFound(_) => hyper::StatusCode::NOT_FOUND,
+            ManagerError::NotFound(_) => hyper::StatusCode::NOT_FOUND,
         }
     }
 }
