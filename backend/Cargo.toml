@@ -20,7 +20,7 @@ chrono = { version = "0.4", features = ["serde"] }
 once_cell = "*"
 rand = "*"
 serde_json = "*"
-toml = "0.7"
+toml = "0.8"
 sha256 = "*"
 image = "0.24"
 sms3rs-shared = { version = "*", path = "../shared" }
