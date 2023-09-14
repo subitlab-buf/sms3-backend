@@ -1,3 +1,5 @@
+use std::hash::{Hash, Hasher};
+
 use chrono::{Days, NaiveDateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha256::digest;
@@ -27,7 +29,7 @@ pub struct Context {
 impl Context {
     pub fn send_verify(&self) {
         info!(
-            "Sending verification code for {} (code: {})",
+            "sending verification code for {} (code: {})",
             self.email, self.code
         );
 
@@ -37,7 +39,7 @@ impl Context {
 
             tokio::spawn(async move {
                 SENDER_INSTANCE.send_verification(&this).await.unwrap();
-                info!("Verification code for {} sent", this.email);
+                info!("verification code for {} sent", this.email);
             });
         }
 
@@ -56,7 +58,7 @@ impl Context {
 /// A simple token manager.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Tokens {
-    inner: Vec<(Option<NaiveDateTime>, String)>,
+    inner: Vec<(Option<NaiveDateTime>, u64)>,
 }
 
 impl Tokens {
@@ -84,24 +86,36 @@ impl Tokens {
                     .unwrap_or_default(),
             )
         };
+
         let token = digest(format!("{}-{:?}", id, now));
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        token.hash(&mut hasher);
+
         if self.inner.capacity() == self.inner.len() + 1 {
             self.inner.remove(self.inner.len());
         }
-        self.inner.push((now, token.clone()));
+
+        self.inner.push((now, hasher.finish()));
         token
     }
 
     /// Remove a target token and return whether the token was be removed successfully.
     pub(super) fn remove(&mut self, token: &str) -> bool {
         let l = self.inner.len();
-        self.inner.retain(|e| e.1 != token);
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        token.hash(&mut hasher);
+        let hash = hasher.finish();
+        self.inner.retain(|e| e.1 != hash);
         l > self.inner.len()
     }
 
     /// Check if a token is usable.
+    #[inline]
     pub fn token_usable(&self, token: &str) -> bool {
-        self.inner.iter().any(|e| e.1 == token)
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        token.hash(&mut hasher);
+        let hash = hasher.finish();
+        self.inner.iter().any(|e| e.1 == hash)
     }
 
     /// Remove expired tokens.
