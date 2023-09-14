@@ -2,9 +2,9 @@
 
 ## Workspace modules
 
-- Server (partial implemented)
+- Server (implemented)
 - Common (shared code for client and server)
-- Client (unimplemented)
+- Client (implementing)
 
 ## Run and debug this project
 
