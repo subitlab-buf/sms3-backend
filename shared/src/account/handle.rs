@@ -56,7 +56,7 @@ pub struct AccountEditDescriptor {
     pub variants: Vec<AccountEditVariant>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub enum AccountEditVariant {
     Name(String),
     SchoolId(u32),
@@ -105,7 +105,7 @@ pub mod manage {
         pub variants: Vec<AccountModifyVariant>,
     }
 
-    #[derive(Serialize, Deserialize)]
+    #[derive(Serialize, Deserialize, Clone)]
     pub enum AccountModifyVariant {
         Email(lettre::Address),
         Name(String),

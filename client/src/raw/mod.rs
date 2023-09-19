@@ -1,22 +1,24 @@
 use std::fmt::{Formatter, Write};
 
 mod account;
+mod account_manage;
+mod post;
 
+#[async_trait::async_trait]
 pub trait Request {
     type Output;
 
     const URL_SUFFIX: &'static str;
     const METHOD: reqwest::Method = reqwest::Method::POST;
 
-    fn make_req(&self, req: reqwest::RequestBuilder)
-        -> anyhow::Result<reqwest::RequestBuilder>;
+    fn make_req(&self, req: reqwest::RequestBuilder) -> anyhow::Result<reqwest::RequestBuilder>;
 
-    fn parse_res(&self, response: reqwest::Response) -> anyhow::Result<Self::Output>;
+    async fn parse_res(&mut self, response: reqwest::Response) -> anyhow::Result<Self::Output>;
 }
 
 /// Calls a [`Request`] and return its output.
 pub async fn call<T: Request>(
-    req: T,
+    mut req: T,
     client: &reqwest::Client,
     url_prefix: &str,
 ) -> anyhow::Result<<T as Request>::Output> {
@@ -54,6 +56,7 @@ pub async fn call<T: Request>(
         impl std::error::Error for ResponseError {}
 
         #[derive(serde::Deserialize)]
+        #[allow(unused)]
         struct ThrownError {
             error: String,
         }
@@ -70,5 +73,39 @@ pub async fn call<T: Request>(
         }));
     }
 
-    req.parse_res(response)
+    req.parse_res(response).await
+}
+
+impl Into<reqwest::header::HeaderMap<reqwest::header::HeaderValue>> for &crate::AccoutInfo {
+    fn into(self) -> reqwest::header::HeaderMap<reqwest::header::HeaderValue> {
+        let mut map = reqwest::header::HeaderMap::new();
+
+        map.insert(
+            "Token",
+            self.token
+                .clone()
+                .expect("token not found")
+                .parse()
+                .unwrap(),
+        );
+
+        map.insert("AccountId", self.user_id.into());
+
+        map
+    }
+}
+
+impl From<&sms3rs_shared::account::handle::ViewAccountResult> for super::User {
+    fn from(res: &sms3rs_shared::account::handle::ViewAccountResult) -> Self {
+        Self {
+            email: res.metadata.email.to_string(),
+            name: res.metadata.name.to_owned(),
+            school_id: res.metadata.school_id,
+            phone: res.metadata.phone,
+            house: res.metadata.house,
+            org: res.metadata.organization.to_owned(),
+            permissions: res.permissions.clone(),
+            registration_time: res.registration_time.to_string(),
+        }
+    }
 }
