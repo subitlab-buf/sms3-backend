@@ -10,5 +10,4 @@ anyhow = "*"
 serde = "1.0"
 async-trait = "*"
 tokio = { version = "1.32", features = ["fs"] }
-tokio-util = { version = "*", features = ["io"] }
 bytes = "*"
