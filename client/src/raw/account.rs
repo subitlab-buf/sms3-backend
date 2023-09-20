@@ -119,9 +119,8 @@ impl super::Request for Login {
             .await
             .map(|value| crate::AccoutInfo {
                 email: self.email.clone(),
-                user_id: value.account_id,
                 token: Some(value.token),
-                user: None,
+                user: crate::LazyAccount::new(value.account_id),
             })?)
     }
 }

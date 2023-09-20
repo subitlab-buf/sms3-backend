@@ -11,3 +11,6 @@ serde = "1.0"
 async-trait = "*"
 tokio = { version = "1.32", features = ["fs"] }
 bytes = "*"
+image = "0.24"
+chrono = "0.4"
+parking_lot = "0.12"

@@ -89,7 +89,7 @@ impl Into<reqwest::header::HeaderMap<reqwest::header::HeaderValue>> for &crate::
                 .unwrap(),
         );
 
-        map.insert("AccountId", self.user_id.into());
+        map.insert("AccountId", self.user.id().into());
 
         map
     }

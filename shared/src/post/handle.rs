@@ -18,7 +18,7 @@ pub struct GetPostsDescriptor {
     pub filters: Vec<GetPostsFilter>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone, Copy)]
 pub enum SimplePostAcceptationStatus {
     Accepted,
     Pending,
@@ -45,7 +45,7 @@ impl SimplePostAcceptationStatus {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub enum GetPostsFilter {
     /// Posts that match target status.
     Acceptation(SimplePostAcceptationStatus),
@@ -63,7 +63,7 @@ pub struct EditPostDescriptor {
     pub variants: Vec<EditPostVariant>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub enum EditPostVariant {
     /// Change status of the post to `Pending`
     /// if the target status is `Submitted`.
@@ -106,7 +106,7 @@ pub struct ApprovePostDescriptor {
     pub variant: ApprovePostVariant,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub enum ApprovePostVariant {
     Accept(
         /// Message
