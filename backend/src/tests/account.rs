@@ -16,7 +16,7 @@ async fn registry() {
     let app = crate::router();
 
     {
-        use sms3rs_shared::account::handle::AccountCreateDescriptor;
+        use sms3_shared::account::handle::AccountCreateDescriptor;
 
         let descriptor = AccountCreateDescriptor {
             email: lettre::Address::new("yujiening2025", "i.pkuschool.edu.cn").unwrap(),
@@ -41,7 +41,7 @@ async fn registry() {
 
     // Wrong verification code
     {
-        use sms3rs_shared::account::handle::AccountVerifyDescriptor;
+        use sms3_shared::account::handle::AccountVerifyDescriptor;
 
         let verification_code = crate::account::verify::VERIFICATION_CODE
             .load(std::sync::atomic::Ordering::Relaxed)
@@ -49,12 +49,12 @@ async fn registry() {
 
         let descriptor = AccountVerifyDescriptor {
             code: verification_code,
-            variant: sms3rs_shared::account::handle::AccountVerifyVariant::Activate {
+            variant: sms3_shared::account::handle::AccountVerifyVariant::Activate {
                 email: lettre::Address::new("yujiening2025", "i.pkuschool.edu.cn").unwrap(),
                 name: "Jiening Yu".to_string(),
                 id: 2522320,
                 phone: 16601550826,
-                house: Some(sms3rs_shared::account::House::ZhiZhi),
+                house: Some(sms3_shared::account::House::ZhiZhi),
                 organization: None,
                 password: "password123456".to_string(),
             },
@@ -78,19 +78,19 @@ async fn registry() {
     }
 
     {
-        use sms3rs_shared::account::handle::AccountVerifyDescriptor;
+        use sms3_shared::account::handle::AccountVerifyDescriptor;
 
         let verification_code =
             crate::account::verify::VERIFICATION_CODE.load(std::sync::atomic::Ordering::Relaxed);
 
         let descriptor = AccountVerifyDescriptor {
             code: verification_code,
-            variant: sms3rs_shared::account::handle::AccountVerifyVariant::Activate {
+            variant: sms3_shared::account::handle::AccountVerifyVariant::Activate {
                 email: lettre::Address::new("yujiening2025", "i.pkuschool.edu.cn").unwrap(),
                 name: "Jiening Yu".to_string(),
                 id: 2522320,
                 phone: 16601550826,
-                house: Some(sms3rs_shared::account::House::ZhiZhi),
+                house: Some(sms3_shared::account::House::ZhiZhi),
                 organization: None,
                 password: "password123456".to_string(),
             },
@@ -131,7 +131,7 @@ async fn login() {
             email: lettre::Address::new("yujiening2025", "i.pkuschool.edu.cn").unwrap(),
             name: "Jiening Yu".to_string(),
             school_id: 2522320,
-            house: Some(sms3rs_shared::account::House::ZhiZhi),
+            house: Some(sms3_shared::account::House::ZhiZhi),
             phone: 16601550826,
             organization: None,
             permissions: vec![],
@@ -145,7 +145,7 @@ async fn login() {
 
     let token;
 
-    use sms3rs_shared::account::handle::AccountLoginDescriptor;
+    use sms3_shared::account::handle::AccountLoginDescriptor;
 
     let descriptor = AccountLoginDescriptor {
         email: lettre::Address::new("yujiening2025", "i.pkuschool.edu.cn").unwrap(),
@@ -216,7 +216,7 @@ fn require_permission_context() {
                 email: lettre::Address::new("yujiening2025", "i.pkuschool.edu.cn").unwrap(),
                 name: "Yu Jiening".to_string(),
                 school_id: 2522320,
-                house: Some(sms3rs_shared::account::House::ZhiZhi),
+                house: Some(sms3_shared::account::House::ZhiZhi),
                 phone: 16601550826,
                 organization: None,
                 permissions: vec![],
@@ -240,7 +240,7 @@ fn require_permission_context() {
         assert!(cxt.try_valid(&[]).unwrap());
 
         assert!(!cxt
-            .try_valid(&[sms3rs_shared::account::Permission::Op])
+            .try_valid(&[sms3_shared::account::Permission::Op])
             .unwrap());
 
         let ctx_wrong = crate::RequirePermissionContext {
@@ -288,7 +288,7 @@ async fn logout() {
             email: lettre::Address::new("yujiening2025", "i.pkuschool.edu.cn").unwrap(),
             name: "Yu Jiening".to_string(),
             school_id: 2522320,
-            house: Some(sms3rs_shared::account::House::ZhiZhi),
+            house: Some(sms3_shared::account::House::ZhiZhi),
             phone: 16601550826,
             organization: None,
             permissions: vec![],
@@ -346,7 +346,7 @@ async fn signout() {
             email: lettre::Address::new("yujiening2025", "i.pkuschool.edu.cn").unwrap(),
             name: "Jiening Yu".to_string(),
             school_id: 2522320,
-            house: Some(sms3rs_shared::account::House::ZhiZhi),
+            house: Some(sms3_shared::account::House::ZhiZhi),
             phone: 16601550826,
             organization: None,
             permissions: vec![],
@@ -362,7 +362,7 @@ async fn signout() {
         verify: crate::account::UserVerifyVariant::None,
     });
 
-    use sms3rs_shared::account::handle::AccountSignOutDescriptor;
+    use sms3_shared::account::handle::AccountSignOutDescriptor;
 
     {
         let descriptor_wrong = AccountSignOutDescriptor {
@@ -434,7 +434,7 @@ async fn view() {
             email: lettre::Address::new("yujiening2025", "i.pkuschool.edu.cn").unwrap(),
             name: "Jiening Yu".to_string(),
             school_id: 2522320,
-            house: Some(sms3rs_shared::account::House::ZhiZhi),
+            house: Some(sms3_shared::account::House::ZhiZhi),
             phone: 16601550826,
             organization: None,
             permissions: vec![],
@@ -450,7 +450,7 @@ async fn view() {
         verify: crate::account::UserVerifyVariant::None,
     });
 
-    use sms3rs_shared::account::handle::ViewAccountResult;
+    use sms3_shared::account::handle::ViewAccountResult;
 
     let response = app
         .oneshot(
@@ -493,7 +493,7 @@ async fn edit() {
             email: lettre::Address::new("yujiening2025", "i.pkuschool.edu.cn").unwrap(),
             name: "Jiening Yu".to_string(),
             school_id: 2522320,
-            house: Some(sms3rs_shared::account::House::ZhiZhi),
+            house: Some(sms3_shared::account::House::ZhiZhi),
             phone: 16601550826,
             organization: None,
             permissions: vec![],
@@ -509,7 +509,7 @@ async fn edit() {
         verify: crate::account::UserVerifyVariant::None,
     });
 
-    use sms3rs_shared::account::handle::{AccountEditDescriptor, AccountEditVariant};
+    use sms3_shared::account::handle::{AccountEditDescriptor, AccountEditVariant};
 
     {
         let descriptor_wrong_pass = AccountEditDescriptor {
@@ -543,7 +543,7 @@ async fn edit() {
             AccountEditVariant::Name("Tianyang He".to_string()),
             AccountEditVariant::SchoolId(2100000),
             AccountEditVariant::Phone(114514),
-            AccountEditVariant::House(Some(sms3rs_shared::account::House::ZhengXin)),
+            AccountEditVariant::House(Some(sms3_shared::account::House::ZhengXin)),
             AccountEditVariant::Organization(Some("SubIT".to_string())),
             AccountEditVariant::Password {
                 old: password.to_string(),
@@ -602,7 +602,7 @@ async fn edit() {
             assert_eq!(attributes.phone, 114514);
             assert_eq!(
                 attributes.house,
-                Some(sms3rs_shared::account::House::ZhengXin)
+                Some(sms3_shared::account::House::ZhengXin)
             );
             assert_eq!(attributes.organization, Some("SubIT".to_string()));
             assert_eq!(attributes.password_sha, digest("newpassword").to_string());
@@ -629,7 +629,7 @@ async fn reset_password() {
             email: lettre::Address::new("yujiening2025", "i.pkuschool.edu.cn").unwrap(),
             name: "Jiening Yu".to_string(),
             school_id: 2522320,
-            house: Some(sms3rs_shared::account::House::ZhiZhi),
+            house: Some(sms3_shared::account::House::ZhiZhi),
             phone: 16601550826,
             organization: None,
             permissions: vec![],
@@ -642,7 +642,7 @@ async fn reset_password() {
     });
 
     {
-        use sms3rs_shared::account::handle::ResetPasswordDescriptor;
+        use sms3_shared::account::handle::ResetPasswordDescriptor;
 
         let descriptor = ResetPasswordDescriptor {
             email: lettre::Address::new("yujiening2025", "i.pkuschool.edu.cn").unwrap(),
@@ -666,7 +666,7 @@ async fn reset_password() {
     }
 
     {
-        use sms3rs_shared::account::handle::{AccountVerifyDescriptor, AccountVerifyVariant};
+        use sms3_shared::account::handle::{AccountVerifyDescriptor, AccountVerifyVariant};
 
         // Wrong verification code
         {

@@ -43,7 +43,7 @@ impl super::Request for GetImg<'_> {
     fn make_req(&self, req: RequestBuilder) -> anyhow::Result<RequestBuilder> {
         Ok(req
             .headers(self.account_info.into())
-            .json(&sms3rs_shared::post::handle::GetImageDescriptor { hash: self.hash }))
+            .json(&sms3_shared::post::handle::GetImageDescriptor { hash: self.hash }))
     }
 
     async fn parse_res(&mut self, response: Response) -> anyhow::Result<Self::Output> {
@@ -66,7 +66,7 @@ impl super::Request for New<'_> {
 
     fn make_req(&self, req: RequestBuilder) -> anyhow::Result<RequestBuilder> {
         Ok(req.headers(self.account_info.into()).json(
-            &sms3rs_shared::post::handle::PostDescriptor {
+            &sms3_shared::post::handle::PostDescriptor {
                 title: self.title.to_owned(),
                 description: self.description.to_owned(),
                 time_range: (*self.time_range.start(), *self.time_range.end()),
@@ -82,7 +82,7 @@ impl super::Request for New<'_> {
 
 pub struct Get<'a> {
     pub account_info: &'a crate::AccoutInfo,
-    pub filters: &'a [sms3rs_shared::post::handle::GetPostsFilter],
+    pub filters: &'a [sms3_shared::post::handle::GetPostsFilter],
 }
 
 #[async_trait::async_trait]
@@ -92,7 +92,7 @@ impl super::Request for Get<'_> {
 
     fn make_req(&self, req: RequestBuilder) -> anyhow::Result<RequestBuilder> {
         Ok(req.headers(self.account_info.into()).json(
-            &sms3rs_shared::post::handle::GetPostsDescriptor {
+            &sms3_shared::post::handle::GetPostsDescriptor {
                 filters: self.filters.to_vec(),
             },
         ))
@@ -120,7 +120,7 @@ impl super::Request for GetInfos<'_> {
 
     fn make_req(&self, req: RequestBuilder) -> anyhow::Result<RequestBuilder> {
         Ok(req.headers(self.account_info.into()).json(
-            &sms3rs_shared::post::handle::GetPostsInfoDescriptor {
+            &sms3_shared::post::handle::GetPostsInfoDescriptor {
                 posts: self.map.keys().into_iter().copied().collect(),
             },
         ))
@@ -129,12 +129,12 @@ impl super::Request for GetInfos<'_> {
     async fn parse_res(&mut self, response: Response) -> anyhow::Result<Self::Output> {
         #[derive(serde::Deserialize)]
         struct Res {
-            results: Vec<sms3rs_shared::post::handle::GetPostInfoResult>,
+            results: Vec<sms3_shared::post::handle::GetPostInfoResult>,
         }
 
         for result in response.json::<Res>().await?.results {
             match result {
-                sms3rs_shared::post::handle::GetPostInfoResult::Full(post) => {
+                sms3_shared::post::handle::GetPostInfoResult::Full(post) => {
                     self.map.insert(
                         post.id,
                         Some(Ok(crate::Post {
@@ -144,12 +144,12 @@ impl super::Request for GetInfos<'_> {
                             ext: Some(crate::PostExt {
                                 description: post.metadata.description,
                                 time: (post.metadata.time_range.0..=post.metadata.time_range.1),
-                                publisher: crate::LazyAccount::new(post.publisher),
+                                publisher: crate::LazyUser::new(post.publisher),
                                 status: post
                                     .status
                                     .into_iter()
                                     .map(|value| crate::PostAccept {
-                                        operator: crate::LazyAccount::new(value.operator),
+                                        operator: crate::LazyUser::new(value.operator),
                                         status: value.status,
                                         time: value.time,
                                     })
@@ -158,7 +158,7 @@ impl super::Request for GetInfos<'_> {
                         })),
                     );
                 }
-                sms3rs_shared::post::handle::GetPostInfoResult::Foreign {
+                sms3_shared::post::handle::GetPostInfoResult::Foreign {
                     id,
                     images,
                     title,
@@ -174,7 +174,7 @@ impl super::Request for GetInfos<'_> {
                         })),
                     );
                 }
-                sms3rs_shared::post::handle::GetPostInfoResult::NotFound(id) => {
+                sms3_shared::post::handle::GetPostInfoResult::NotFound(id) => {
                     self.map
                         .insert(id, Some(Err(anyhow::anyhow!("post not found"))));
                 }
@@ -188,7 +188,7 @@ impl super::Request for GetInfos<'_> {
 pub struct Edit<'a> {
     pub account_info: &'a crate::AccoutInfo,
     pub post: u64,
-    pub actions: &'a [sms3rs_shared::post::handle::EditPostVariant],
+    pub actions: &'a [sms3_shared::post::handle::EditPostVariant],
 }
 
 #[async_trait::async_trait]
@@ -198,7 +198,7 @@ impl super::Request for Edit<'_> {
 
     fn make_req(&self, req: RequestBuilder) -> anyhow::Result<RequestBuilder> {
         Ok(req.headers(self.account_info.into()).json(
-            &sms3rs_shared::post::handle::EditPostDescriptor {
+            &sms3_shared::post::handle::EditPostDescriptor {
                 post: self.post,
                 variants: self.actions.to_vec(),
             },
@@ -213,7 +213,7 @@ impl super::Request for Edit<'_> {
 pub struct Approve<'a> {
     pub account_info: &'a crate::AccoutInfo,
     pub post: u64,
-    pub action: sms3rs_shared::post::handle::ApprovePostVariant,
+    pub action: sms3_shared::post::handle::ApprovePostVariant,
 }
 
 #[async_trait::async_trait]
@@ -223,7 +223,7 @@ impl super::Request for Approve<'_> {
 
     fn make_req(&self, req: RequestBuilder) -> anyhow::Result<RequestBuilder> {
         Ok(req.headers(self.account_info.into()).json(
-            &sms3rs_shared::post::handle::ApprovePostDescriptor {
+            &sms3_shared::post::handle::ApprovePostDescriptor {
                 post: self.post,
                 variant: self.action.clone(),
             },

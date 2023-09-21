@@ -26,10 +26,10 @@ async fn make() {
             email: lettre::Address::new("yujiening2025", "i.pkuschool.edu.cn").unwrap(),
             name: "Jiening Yu".to_string(),
             school_id: 2522320,
-            house: Some(sms3rs_shared::account::House::ZhiZhi),
+            house: Some(sms3_shared::account::House::ZhiZhi),
             phone: 16601550826,
             organization: None,
-            permissions: vec![sms3rs_shared::account::Permission::ManageAccounts],
+            permissions: vec![sms3_shared::account::Permission::ManageAccounts],
             registration_time: chrono::Utc::now(),
             password_sha: digest(password.to_string()),
             token_expiration_time: 0,
@@ -42,7 +42,7 @@ async fn make() {
         verify: crate::account::UserVerifyVariant::None,
     });
 
-    use sms3rs_shared::account::handle::manage::MakeAccountDescriptor;
+    use sms3_shared::account::handle::manage::MakeAccountDescriptor;
 
     let descriptor = MakeAccountDescriptor {
         email: lettre::Address::new("myg", "i.pkuschool.edu.cn").unwrap(),
@@ -53,8 +53,8 @@ async fn make() {
         organization: Some("PKU".to_string()),
         password: "password".to_string(),
         permissions: vec![
-            sms3rs_shared::account::Permission::ManageAccounts,
-            sms3rs_shared::account::Permission::Op,
+            sms3_shared::account::Permission::ManageAccounts,
+            sms3_shared::account::Permission::Op,
         ],
     };
 
@@ -102,13 +102,13 @@ async fn make() {
     assert!(a
         .unwrap()
         .read()
-        .has_permission(sms3rs_shared::account::Permission::ManageAccounts));
+        .has_permission(sms3_shared::account::Permission::ManageAccounts));
 
     // test for permission overflowing
     assert!(!a
         .unwrap()
         .read()
-        .has_permission(sms3rs_shared::account::Permission::Op));
+        .has_permission(sms3_shared::account::Permission::Op));
 }
 
 #[serial]
@@ -129,10 +129,10 @@ async fn view() {
             email: lettre::Address::new("yujiening2025", "i.pkuschool.edu.cn").unwrap(),
             name: "Jiening Yu".to_string(),
             school_id: 2522320,
-            house: Some(sms3rs_shared::account::House::ZhiZhi),
+            house: Some(sms3_shared::account::House::ZhiZhi),
             phone: 16601550826,
             organization: None,
-            permissions: vec![sms3rs_shared::account::Permission::ViewAccounts],
+            permissions: vec![sms3_shared::account::Permission::ViewAccounts],
             registration_time: chrono::Utc::now(),
             password_sha: digest(password.to_string()),
             token_expiration_time: 0,
@@ -158,7 +158,7 @@ async fn view() {
             house: None,
             phone: 1919810,
             organization: None,
-            permissions: vec![sms3rs_shared::account::Permission::Op],
+            permissions: vec![sms3_shared::account::Permission::Op],
             registration_time: chrono::Utc::now(),
             password_sha: digest(test_password.to_string()),
             token_expiration_time: 0,
@@ -185,7 +185,7 @@ async fn view() {
         verify: crate::account::UserVerifyVariant::None,
     });
 
-    let descriptor = sms3rs_shared::account::handle::manage::ViewAccountDescriptor {
+    let descriptor = sms3_shared::account::handle::manage::ViewAccountDescriptor {
         accounts: vec![test_account_id_0, test_account_id_1],
     };
 
@@ -210,7 +210,7 @@ async fn view() {
         serde_json::from_slice(&hyper::body::to_bytes(response.into_body()).await.unwrap())
             .unwrap();
 
-    let result: Vec<sms3rs_shared::account::handle::manage::ViewAccountResult> = response_json
+    let result: Vec<sms3_shared::account::handle::manage::ViewAccountResult> = response_json
         .as_object()
         .unwrap()
         .get("results")
@@ -223,21 +223,21 @@ async fn view() {
 
     assert!(matches!(
         result[0],
-        sms3rs_shared::account::handle::manage::ViewAccountResult::Err { .. }
+        sms3_shared::account::handle::manage::ViewAccountResult::Err { .. }
     ));
 
     assert!(matches!(
         result[1],
-        sms3rs_shared::account::handle::manage::ViewAccountResult::Ok(_)
+        sms3_shared::account::handle::manage::ViewAccountResult::Ok(_)
     ));
 
-    if let sms3rs_shared::account::handle::manage::ViewAccountResult::Err { id, .. } = &result[0] {
+    if let sms3_shared::account::handle::manage::ViewAccountResult::Err { id, .. } = &result[0] {
         assert_eq!(id, &test_account_id_0)
     } else {
         unreachable!()
     }
 
-    if let sms3rs_shared::account::handle::manage::ViewAccountResult::Ok(e) = &result[1] {
+    if let sms3_shared::account::handle::manage::ViewAccountResult::Ok(e) = &result[1] {
         assert_eq!(e.id, test_account_id_1)
     } else {
         unreachable!()
@@ -262,10 +262,10 @@ async fn modify() {
             email: lettre::Address::new("yujiening2025", "i.pkuschool.edu.cn").unwrap(),
             name: "Jiening Yu".to_string(),
             school_id: 2522320,
-            house: Some(sms3rs_shared::account::House::ZhiZhi),
+            house: Some(sms3_shared::account::House::ZhiZhi),
             phone: 16601550826,
             organization: None,
-            permissions: vec![sms3rs_shared::account::Permission::ManageAccounts],
+            permissions: vec![sms3_shared::account::Permission::ManageAccounts],
             registration_time: chrono::Utc::now(),
             password_sha: digest(password.to_string()),
             token_expiration_time: 0,
@@ -291,7 +291,7 @@ async fn modify() {
             house: None,
             phone: 1919810,
             organization: None,
-            permissions: vec![sms3rs_shared::account::Permission::Op],
+            permissions: vec![sms3_shared::account::Permission::Op],
             registration_time: chrono::Utc::now(),
             password_sha: digest(test_password.to_string()),
             token_expiration_time: 0,
@@ -318,7 +318,7 @@ async fn modify() {
         verify: crate::account::UserVerifyVariant::None,
     });
 
-    use sms3rs_shared::account::{
+    use sms3_shared::account::{
         handle::manage::{AccountModifyDescriptor, AccountModifyVariant},
         Permission,
     };
@@ -358,7 +358,7 @@ async fn modify() {
                 AccountModifyVariant::Name("Tianyang He".to_string()),
                 AccountModifyVariant::SchoolId(2100000),
                 AccountModifyVariant::Phone(1),
-                AccountModifyVariant::House(Some(sms3rs_shared::account::House::ZhengXin)),
+                AccountModifyVariant::House(Some(sms3_shared::account::House::ZhengXin)),
                 AccountModifyVariant::Organization(Some("SubIT".to_string())),
                 AccountModifyVariant::Permission(vec![Permission::ManageAccounts, Permission::Op]),
             ],
@@ -412,7 +412,7 @@ async fn modify() {
             assert_eq!(attributes.phone, 1);
             assert_eq!(
                 attributes.house,
-                Some(sms3rs_shared::account::House::ZhengXin)
+                Some(sms3_shared::account::House::ZhengXin)
             );
             assert_eq!(attributes.organization, Some("SubIT".to_string()));
             assert_eq!(attributes.permissions, &[Permission::ManageAccounts]);

@@ -16,7 +16,7 @@ use sha256::digest;
 use std::ops::Deref;
 use std::ops::DerefMut;
 
-use sms3rs_shared::account::handle::*;
+use sms3_shared::account::handle::*;
 
 /// Create an unverified account.
 pub async fn create_account(
@@ -343,7 +343,7 @@ pub mod manage {
     use std::hash::{Hash, Hasher};
     use std::ops::{Deref, DerefMut};
 
-    use sms3rs_shared::account::handle::manage::*;
+    use sms3_shared::account::handle::manage::*;
 
     /// Let admin creating accounts.
     pub async fn make_account(

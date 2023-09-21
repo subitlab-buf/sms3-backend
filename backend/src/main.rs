@@ -7,7 +7,7 @@ mod post;
 mod tests;
 
 use axum::{async_trait, http::StatusCode, response::IntoResponse, routing::post};
-use sms3rs_shared::account::Permission;
+use sms3_shared::account::Permission;
 use std::ops::Deref;
 
 #[tokio::main]

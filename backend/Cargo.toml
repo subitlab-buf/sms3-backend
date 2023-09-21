@@ -1,5 +1,5 @@
 [package]
-name = "sms3rs-backend"
+name = "sms3-backend"
 version = "0.1.0"
 edition = "2021"
 
@@ -23,7 +23,7 @@ serde_json = "*"
 toml = "0.8"
 sha256 = "*"
 image = "0.24"
-sms3rs-shared = { version = "*", path = "../shared" }
+sms3-shared = { version = "*", path = "../shared" }
 parking_lot = "*"
 dashmap = "*"
 mime = "*"

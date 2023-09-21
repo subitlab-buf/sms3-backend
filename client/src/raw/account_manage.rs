@@ -19,7 +19,7 @@ impl super::Request for CreateUser<'_> {
 
     fn make_req(&self, req: RequestBuilder) -> anyhow::Result<RequestBuilder> {
         Ok(req.headers(self.account_info.into()).json(
-            &sms3rs_shared::account::handle::manage::MakeAccountDescriptor {
+            &sms3_shared::account::handle::manage::MakeAccountDescriptor {
                 email: self.email.parse()?,
                 name: self.name.to_owned(),
                 school_id: self.school_id,
@@ -54,7 +54,7 @@ impl super::Request for View<'_> {
 
     fn make_req(&self, req: RequestBuilder) -> anyhow::Result<RequestBuilder> {
         Ok(req.headers(self.account_info.into()).json(
-            &sms3rs_shared::account::handle::manage::ViewAccountDescriptor {
+            &sms3_shared::account::handle::manage::ViewAccountDescriptor {
                 accounts: self.map.keys().into_iter().cloned().collect(),
             },
         ))
@@ -63,15 +63,15 @@ impl super::Request for View<'_> {
     async fn parse_res(&mut self, response: Response) -> anyhow::Result<Self::Output> {
         #[derive(serde::Deserialize)]
         struct Res {
-            results: Vec<sms3rs_shared::account::handle::manage::ViewAccountResult>,
+            results: Vec<sms3_shared::account::handle::manage::ViewAccountResult>,
         }
 
         for result in response.json::<Res>().await?.results {
             match result {
-                sms3rs_shared::account::handle::manage::ViewAccountResult::Err { id, error } => {
+                sms3_shared::account::handle::manage::ViewAccountResult::Err { id, error } => {
                     self.map.insert(id, Some(Err(anyhow::anyhow!(error))));
                 }
-                sms3rs_shared::account::handle::manage::ViewAccountResult::Ok(ref value) => {
+                sms3_shared::account::handle::manage::ViewAccountResult::Ok(ref value) => {
                     self.map.insert(value.id, Some(Ok(value.into())));
                 }
             }
@@ -84,7 +84,7 @@ impl super::Request for View<'_> {
 pub struct Modify<'a> {
     pub account_info: &'a crate::AccoutInfo,
     pub target_account_id: u64,
-    pub actions: &'a [sms3rs_shared::account::handle::manage::AccountModifyVariant],
+    pub actions: &'a [sms3_shared::account::handle::manage::AccountModifyVariant],
 }
 
 #[async_trait::async_trait]
@@ -94,7 +94,7 @@ impl super::Request for Modify<'_> {
 
     fn make_req(&self, req: RequestBuilder) -> anyhow::Result<RequestBuilder> {
         Ok(req.headers(self.account_info.into()).json(
-            &sms3rs_shared::account::handle::manage::AccountModifyDescriptor {
+            &sms3_shared::account::handle::manage::AccountModifyDescriptor {
                 account_id: self.target_account_id,
                 variants: self.actions.to_vec(),
             },

@@ -11,7 +11,7 @@ impl super::Request for Create {
 
     fn make_req(&self, req: RequestBuilder) -> anyhow::Result<RequestBuilder> {
         Ok(
-            req.json(&sms3rs_shared::account::handle::AccountCreateDescriptor {
+            req.json(&sms3_shared::account::handle::AccountCreateDescriptor {
                 email: self.email.parse()?,
             }),
         )
@@ -40,9 +40,9 @@ impl super::Request for Activate {
 
     fn make_req(&self, req: reqwest::RequestBuilder) -> anyhow::Result<reqwest::RequestBuilder> {
         Ok(
-            req.json(&sms3rs_shared::account::handle::AccountVerifyDescriptor {
+            req.json(&sms3_shared::account::handle::AccountVerifyDescriptor {
                 code: self.verify_code,
-                variant: sms3rs_shared::account::handle::AccountVerifyVariant::Activate {
+                variant: sms3_shared::account::handle::AccountVerifyVariant::Activate {
                     email: self.email.parse()?,
                     name: self.name.clone(),
                     id: self.school_id,
@@ -73,9 +73,9 @@ impl super::Request for ResetPasswordActivate {
 
     fn make_req(&self, req: reqwest::RequestBuilder) -> anyhow::Result<reqwest::RequestBuilder> {
         Ok(
-            req.json(&sms3rs_shared::account::handle::AccountVerifyDescriptor {
+            req.json(&sms3_shared::account::handle::AccountVerifyDescriptor {
                 code: self.verify_code,
-                variant: sms3rs_shared::account::handle::AccountVerifyVariant::ResetPassword {
+                variant: sms3_shared::account::handle::AccountVerifyVariant::ResetPassword {
                     email: self.email.parse()?,
                     password: self.password.clone(),
                 },
@@ -100,7 +100,7 @@ impl super::Request for Login {
 
     fn make_req(&self, req: RequestBuilder) -> anyhow::Result<RequestBuilder> {
         Ok(
-            req.json(&sms3rs_shared::account::handle::AccountLoginDescriptor {
+            req.json(&sms3_shared::account::handle::AccountLoginDescriptor {
                 email: self.email.parse()?,
                 password: self.password.clone(),
             }),
@@ -120,7 +120,7 @@ impl super::Request for Login {
             .map(|value| crate::AccoutInfo {
                 email: self.email.clone(),
                 token: Some(value.token),
-                user: crate::LazyAccount::new(value.account_id),
+                user: crate::LazyUser::new(value.account_id),
             })?)
     }
 }
@@ -155,7 +155,7 @@ impl super::Request for SignOut<'_> {
 
     fn make_req(&self, req: RequestBuilder) -> anyhow::Result<RequestBuilder> {
         Ok(req.headers(self.account_info.into()).json(
-            &sms3rs_shared::account::handle::AccountSignOutDescriptor {
+            &sms3_shared::account::handle::AccountSignOutDescriptor {
                 password: self.password.clone(),
             },
         ))
@@ -172,7 +172,7 @@ pub struct View<'a> {
 
 #[async_trait::async_trait]
 impl super::Request for View<'_> {
-    type Output = (u64, crate::User);
+    type Output = crate::User;
     const URL_SUFFIX: &'static str = "/api/account/view";
 
     fn make_req(&self, req: RequestBuilder) -> anyhow::Result<RequestBuilder> {
@@ -180,15 +180,16 @@ impl super::Request for View<'_> {
     }
 
     async fn parse_res(&mut self, response: Response) -> anyhow::Result<Self::Output> {
-        let res: sms3rs_shared::account::handle::ViewAccountResult = response.json().await?;
+        let res: sms3_shared::account::handle::ViewAccountResult = response.json().await?;
+        assert_eq!(res.id, self.account_info.user.id);
 
-        Ok((res.id, (&res).into()))
+        Ok((&res).into())
     }
 }
 
 pub struct Edit<'a> {
     pub account_info: &'a crate::AccoutInfo,
-    pub actions: &'a [sms3rs_shared::account::handle::AccountEditVariant],
+    pub actions: &'a [sms3_shared::account::handle::AccountEditVariant],
 }
 
 #[async_trait::async_trait]
@@ -198,7 +199,7 @@ impl super::Request for Edit<'_> {
 
     fn make_req(&self, req: RequestBuilder) -> anyhow::Result<RequestBuilder> {
         Ok(req.headers(self.account_info.into()).json(
-            &sms3rs_shared::account::handle::AccountEditDescriptor {
+            &sms3_shared::account::handle::AccountEditDescriptor {
                 variants: self.actions.to_vec(),
             },
         ))
@@ -220,7 +221,7 @@ impl super::Request for ResetPasswordReq {
 
     fn make_req(&self, req: RequestBuilder) -> anyhow::Result<RequestBuilder> {
         Ok(
-            req.json(&sms3rs_shared::account::handle::ResetPasswordDescriptor {
+            req.json(&sms3_shared::account::handle::ResetPasswordDescriptor {
                 email: self.email.parse()?,
             }),
         )
@@ -244,9 +245,9 @@ impl super::Request for ResetPasswordAct {
 
     fn make_req(&self, req: RequestBuilder) -> anyhow::Result<RequestBuilder> {
         Ok(
-            req.json(&sms3rs_shared::account::handle::AccountVerifyDescriptor {
+            req.json(&sms3_shared::account::handle::AccountVerifyDescriptor {
                 code: self.verify_code,
-                variant: sms3rs_shared::account::handle::AccountVerifyVariant::ResetPassword {
+                variant: sms3_shared::account::handle::AccountVerifyVariant::ResetPassword {
                     email: self.email.parse()?,
                     password: self.password.to_owned(),
                 },

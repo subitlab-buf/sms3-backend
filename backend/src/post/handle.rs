@@ -17,7 +17,7 @@ use std::hash::Hasher;
 use std::ops::Deref;
 use std::sync::atomic;
 
-use sms3rs_shared::post::handle::*;
+use sms3_shared::post::handle::*;
 
 /// Read and store a cache image with cache id returned.
 pub async fn cache_image(
@@ -353,7 +353,7 @@ fn apply_edit_post_variant(
         }
 
         EditPostVariant::RequestReview(msg) => {
-            if let Some(sms3rs_shared::post::PostAcceptationData { status, .. }) =
+            if let Some(sms3_shared::post::PostAcceptationData { status, .. }) =
                 post.status.last()
             {
                 if let PostAcceptationStatus::Submitted(msg1) = status {
@@ -439,7 +439,7 @@ pub async fn approve_post(
 
         match descriptor.variant {
             ApprovePostVariant::Accept(msg) => {
-                if let Some(sms3rs_shared::post::PostAcceptationData { status, .. }) =
+                if let Some(sms3_shared::post::PostAcceptationData { status, .. }) =
                     pw.status.last()
                 {
                     if let PostAcceptationStatus::Accepted(msg) = status {
@@ -458,7 +458,7 @@ pub async fn approve_post(
             }
 
             ApprovePostVariant::Reject(msg) => {
-                if let Some(sms3rs_shared::post::PostAcceptationData { status, .. }) =
+                if let Some(sms3_shared::post::PostAcceptationData { status, .. }) =
                     pw.status.last()
                 {
                     if let PostAcceptationStatus::Rejected(msg) = status {

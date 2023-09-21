@@ -4,7 +4,7 @@ pub mod handle;
 use once_cell::sync::Lazy;
 use parking_lot::RwLock;
 
-pub use sms3rs_shared::post::*;
+pub use sms3_shared::post::*;
 
 pub static INSTANCE: Lazy<PostManager> = Lazy::new(PostManager::new);
 

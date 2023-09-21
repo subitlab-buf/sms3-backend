@@ -1752,7 +1752,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "62bb4feee49fdd9f707ef802e22365a35de4b7b299de4763d44bfea899442ff9"
 
 [[package]]
-name = "sms3rs-backend"
+name = "sms3-backend"
 version = "0.1.0"
 dependencies = [
  "axum",
@@ -1770,7 +1770,7 @@ dependencies = [
  "serde_json",
  "serial_test",
  "sha256",
- "sms3rs-shared",
+ "sms3-shared",
  "thiserror",
  "tokio",
  "toml",
@@ -1779,23 +1779,24 @@ dependencies = [
 ]
 
 [[package]]
-name = "sms3rs-client"
+name = "sms3-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
  "bytes",
  "chrono",
+ "dashmap",
  "image",
  "parking_lot",
  "reqwest",
  "serde",
- "sms3rs-shared",
+ "sms3-shared",
  "tokio",
 ]
 
 [[package]]
-name = "sms3rs-shared"
+name = "sms3-shared"
 version = "0.1.0"
 dependencies = [
  "chrono",

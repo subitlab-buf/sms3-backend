@@ -1,10 +1,10 @@
 [package]
-name = "sms3rs-client"
+name = "sms3-client"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-sms3rs-shared = { version = "*", path = "../shared" }
+sms3-shared = { version = "*", path = "../shared" }
 reqwest = { version = "0.11", features = ["json", "stream"] }
 anyhow = "*"
 serde = "1.0"
@@ -14,3 +14,4 @@ bytes = "*"
 image = "0.24"
 chrono = "0.4"
 parking_lot = "0.12"
+dashmap = "5.5"

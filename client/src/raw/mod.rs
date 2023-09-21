@@ -1,8 +1,8 @@
 use std::fmt::{Formatter, Write};
 
-mod account;
-mod account_manage;
-mod post;
+pub mod account;
+pub mod account_manage;
+pub mod post;
 
 #[async_trait::async_trait]
 pub trait Request {
@@ -19,11 +19,13 @@ pub trait Request {
 /// Calls a [`Request`] and return its output.
 pub async fn call<T: Request>(
     mut req: T,
-    client: &reqwest::Client,
-    url_prefix: &str,
+    cx: &crate::Context,
 ) -> anyhow::Result<<T as Request>::Output> {
     let response = req
-        .make_req(client.request(T::METHOD, format!("{url_prefix}{}", T::URL_SUFFIX)))?
+        .make_req(
+            cx.req_client
+                .request(T::METHOD, format!("{}{}", cx.url_prefix, T::URL_SUFFIX)),
+        )?
         .send()
         .await?;
     let status = response.status();
@@ -95,8 +97,8 @@ impl Into<reqwest::header::HeaderMap<reqwest::header::HeaderValue>> for &crate::
     }
 }
 
-impl From<&sms3rs_shared::account::handle::ViewAccountResult> for super::User {
-    fn from(res: &sms3rs_shared::account::handle::ViewAccountResult) -> Self {
+impl From<&sms3_shared::account::handle::ViewAccountResult> for super::User {
+    fn from(res: &sms3_shared::account::handle::ViewAccountResult) -> Self {
         Self {
             email: res.metadata.email.to_string(),
             name: res.metadata.name.to_owned(),

@@ -26,7 +26,7 @@ async fn cache_image() {
             email: lettre::Address::new("yujiening2025", "i.pkuschool.edu.cn").unwrap(),
             name: "Jiening Yu".to_string(),
             school_id: 2522320,
-            house: Some(sms3rs_shared::account::House::ZhiZhi),
+            house: Some(sms3_shared::account::House::ZhiZhi),
             phone: 16601550826,
             organization: None,
             permissions: vec![crate::account::Permission::Post],
@@ -93,10 +93,10 @@ async fn new() {
             email: lettre::Address::new("yujiening2025", "i.pkuschool.edu.cn").unwrap(),
             name: "Jiening Yu".to_string(),
             school_id: 2522320,
-            house: Some(sms3rs_shared::account::House::ZhiZhi),
+            house: Some(sms3_shared::account::House::ZhiZhi),
             phone: 16601550826,
             organization: None,
-            permissions: vec![sms3rs_shared::account::Permission::Post],
+            permissions: vec![sms3_shared::account::Permission::Post],
             registration_time: chrono::Utc::now(),
             password_sha: digest(password.to_string()),
             token_expiration_time: 0,
@@ -121,7 +121,7 @@ async fn new() {
             img: parking_lot::RwLock::new(None),
         });
 
-    use sms3rs_shared::post::handle::PostDescriptor;
+    use sms3_shared::post::handle::PostDescriptor;
 
     let descriptor = PostDescriptor {
         title: "Test post".to_string(),

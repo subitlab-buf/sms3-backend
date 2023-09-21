@@ -14,7 +14,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-pub use sms3rs_shared::account::*;
+pub use sms3_shared::account::*;
 
 /// The static instance of accounts.
 pub static INSTANCE: Lazy<AccountManager> = Lazy::new(AccountManager::new);
