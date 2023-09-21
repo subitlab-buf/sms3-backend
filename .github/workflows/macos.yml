@@ -22,4 +22,4 @@ jobs:
       uses: actions/upload-artifact@v3
       with:
         name: binary
-        path: target/release/sms3rs-backend
+        path: target/release/sms3-backend
