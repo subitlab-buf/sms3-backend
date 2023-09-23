@@ -1,9 +1,6 @@
 [workspace]
 resolver = "2"
-members = [
-    "shared",
-    "client"
-]
+members = ["shared"]
 
 [package]
 name = "sms3-backend"
