@@ -95,7 +95,8 @@ pub struct Login {
 
 #[async_trait::async_trait]
 impl super::Request for Login {
-    type Output = crate::AccoutInfo;
+    /// AccountId, Token
+    type Output = (u64, String);
     const URL_SUFFIX: &'static str = "/api/account/login";
 
     fn make_req(&self, req: RequestBuilder) -> anyhow::Result<RequestBuilder> {
@@ -117,11 +118,7 @@ impl super::Request for Login {
         Ok(response
             .json::<ResponseBody>()
             .await
-            .map(|value| crate::AccoutInfo {
-                email: self.email.clone(),
-                token: Some(value.token),
-                user: crate::LazyUser::new(value.account_id),
-            })?)
+            .map(|value| (value.account_id, value.token))?)
     }
 }
 

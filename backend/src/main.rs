@@ -9,9 +9,14 @@ mod tests;
 use axum::{async_trait, http::StatusCode, response::IntoResponse, routing::post};
 use sms3_shared::account::Permission;
 use std::ops::Deref;
+use tracing::info;
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .init();
+
     account::INSTANCE.refresh_all();
 
     // use an external function here so this won't be in a proc macros
@@ -20,6 +25,8 @@ async fn main() {
 
     // socket in 127.0.0.1:8080
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], 8080));
+
+    info!("initialized");
 
     axum::Server::bind(&addr)
         .serve(app.into_make_service())

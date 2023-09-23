@@ -353,8 +353,7 @@ fn apply_edit_post_variant(
         }
 
         EditPostVariant::RequestReview(msg) => {
-            if let Some(sms3_shared::post::PostAcceptationData { status, .. }) =
-                post.status.last()
+            if let Some(sms3_shared::post::PostAcceptationData { status, .. }) = post.status.last()
             {
                 if let PostAcceptationStatus::Submitted(msg1) = status {
                     return Err(super::Error::Already(PostAcceptationStatus::Submitted(

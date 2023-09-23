@@ -65,14 +65,14 @@ impl super::Request for New<'_> {
     const URL_SUFFIX: &'static str = "/api/post/create";
 
     fn make_req(&self, req: RequestBuilder) -> anyhow::Result<RequestBuilder> {
-        Ok(req.headers(self.account_info.into()).json(
-            &sms3_shared::post::handle::PostDescriptor {
+        Ok(req
+            .headers(self.account_info.into())
+            .json(&sms3_shared::post::handle::PostDescriptor {
                 title: self.title.to_owned(),
                 description: self.description.to_owned(),
                 time_range: (*self.time_range.start(), *self.time_range.end()),
                 images: self.images.iter().copied().collect(),
-            },
-        ))
+            }))
     }
 
     async fn parse_res(&mut self, _response: Response) -> anyhow::Result<Self::Output> {

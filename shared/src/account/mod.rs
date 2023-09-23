@@ -3,7 +3,7 @@ pub mod handle;
 use serde::{Deserialize, Serialize};
 
 /// Represents houses of PKUSchool.
-#[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq, sqlx::Type)]
+#[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum House {
     ChengYi,

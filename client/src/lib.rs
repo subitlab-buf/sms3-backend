@@ -1,5 +1,7 @@
 mod raw;
 
+use std::sync::Arc;
+
 pub use sms3_shared::account::{House, Permission};
 
 pub mod raw_shared {
@@ -47,15 +49,26 @@ type UserWrap = std::sync::Arc<tokio::sync::RwLock<anyhow::Result<User>>>;
 
 struct LazyUser {
     id: u64,
-    user: std::sync::OnceLock<UserWrap>,
+    user: std::cell::UnsafeCell<MaybeUninitUserLazyWrap>,
+    lock: std::sync::Mutex<()>,
+}
+
+// this should be safe due to mutex
+unsafe impl Sync for LazyUser {}
+
+enum MaybeUninitUserLazyWrap {
+    Queued(std::sync::Arc<()>),
+    Ok(UserWrap),
 }
 
 impl LazyUser {
     #[inline]
-    pub fn new(id: u64) -> Self {
+    pub fn new(id: u64, cx: &Context) -> Self {
+        let queued = std::sync::Arc::new(());
         Self {
             id,
-            user: std::sync::OnceLock::new(),
+            user: std::cell::UnsafeCell::new(MaybeUninitUserLazyWrap::Queued(queued)),
+            lock: std::sync::Mutex::new(()),
         }
     }
 
@@ -68,19 +81,13 @@ impl LazyUser {
         &self,
         cx: &Context,
     ) -> tokio::sync::RwLockReadGuard<anyhow::Result<User>> {
-        self.user
-            .get_or_init(|| {
-                if let Some(user) = cx.user_map.get(&self.id) {
-                    std::sync::Arc::clone(user.value())
-                } else {
-                    todo!()
-                }
-            })
-            .read()
-            .await
+        match unsafe { &mut *self.user.get() } {
+            MaybeUninitUserLazyWrap::Queued(_) => self.get_raw_user_and_bump_cx(cx).await,
+            MaybeUninitUserLazyWrap::Ok(usr) => usr.read().await,
+        }
     }
 
-    async fn get_raw_user(&self, cx: &Context) -> anyhow::Result<User> {
+    async fn get_raw_user_and_bump_cx(&self, cx: &Context) -> anyhow::Result<User> {
         if cx.account().user.id == self.id {
             raw::call(
                 raw::account::View {
@@ -111,10 +118,10 @@ impl LazyUser {
 }
 
 pub struct Context {
-    user_map: dashmap::DashMap<u64, UserWrap>,
+    account: Option<AccoutInfo>,
     req_client: reqwest::Client,
     url_prefix: String,
-    account: Option<AccoutInfo>,
+    user_map: dashmap::DashMap<u64, (Option<UserWrap>, Option<std::sync::Weak<()>>)>, // user, needs_update
 }
 
 impl Context {
@@ -136,5 +143,30 @@ impl Context {
         self.account
             .as_ref()
             .expect("trying to get account info when not logged in")
+    }
+
+    #[inline]
+    fn make_uninit_user(&self, id: u64) -> Arc<()> {
+        if let Some(mut value) = self.user_map.get_mut(&id) {
+            if let Some(arc) = value.1.as_ref().and_then(std::sync::Weak::upgrade) {
+                return arc;
+            }
+
+            let arc = Arc::new(());
+            value.1 = Some(Arc::downgrade(&arc));
+            arc
+        } else {
+            let arc = Arc::new(());
+            self.user_map.insert(id, (None, Some(Arc::downgrade(&arc))));
+            arc
+        }
+    }
+
+    #[inline]
+    fn user_needs_fetch(&self, id: u64) -> bool {
+        self.user_map
+            .get(&id)
+            .and_then(|value| value.1.as_ref().map(|e| e.strong_count() > 0))
+            .unwrap_or(true)
     }
 }

@@ -9,4 +9,3 @@ edition = "2021"
 serde = { version = "*", features = ["derive"] }
 lettre = { version = "*", default-features = false, features = ["serde"] }
 chrono = { version = "*", features = ["serde"] }
-sqlx = { version = "*", default-features = false, features = ["macros"] }

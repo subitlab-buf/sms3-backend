@@ -13,6 +13,7 @@ use std::{
     hash::{Hash, Hasher},
     ops::{Deref, DerefMut},
 };
+use tracing::debug;
 
 pub use sms3_shared::account::*;
 
@@ -399,21 +400,28 @@ impl AccountManager {
     pub fn refresh_all(&self) {
         {
             let mut rm_list: Vec<usize> = Vec::new();
+
             for account in self.accounts.read().iter().enumerate() {
                 {
                     let r_binding = account.1.read();
-                    if match r_binding.deref() {
-                        Account::Unverified(cxt) => cxt.is_expired(),
-                        _ => false,
+                    if if let Account::Unverified(cx) = r_binding.deref() {
+                        cx.is_expired()
+                    } else {
+                        false
                     } {
                         rm_list.push(account.0);
                     }
                 }
             }
-            let mut w = self.accounts.write();
-            for i in rm_list.iter().enumerate() {
-                w.remove(*i.1 - i.0);
+
+            {
+                let mut w = self.accounts.write();
+
+                for i in rm_list.iter().enumerate() {
+                    w.remove(*i.1 - i.0);
+                }
             }
+
             if !rm_list.is_empty() {
                 self.update_index();
             }
@@ -433,6 +441,8 @@ impl AccountManager {
                 }
             }
         }
+
+        debug!("accounts refreshed");
     }
 
     /// Refresh target account.
