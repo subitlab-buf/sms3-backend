@@ -6,7 +6,7 @@ use serial_test::serial;
 use sha256::digest;
 use tower::ServiceExt;
 
-const TEST_POST_IMG: &[u8; 108416] = include_bytes!("../../../test-resources/test_post.png");
+const TEST_POST_IMG: &[u8; 108416] = include_bytes!("../../test-resources/test_post.png");
 
 #[serial]
 #[tokio::test]
