@@ -79,20 +79,18 @@ impl PostManager {
 
             let mut vec = Vec::new();
 
-            for dir in fs::read_dir("./data/posts").unwrap() {
-                if let Ok(f) = dir {
-                    if let Ok(cache) = {
-                        toml::from_str::<Post>(&{
-                            let mut string = String::new();
-                            File::open(f.path())
-                                .unwrap()
-                                .read_to_string(&mut string)
-                                .unwrap();
-                            string
-                        })
-                    } {
-                        vec.push(cache)
-                    }
+            for dir in fs::read_dir("./data/posts").unwrap().flatten() {
+                if let Ok(cache) = {
+                    toml::from_str::<Post>(&{
+                        let mut string = String::new();
+                        File::open(dir.path())
+                            .unwrap()
+                            .read_to_string(&mut string)
+                            .unwrap();
+                        string
+                    })
+                } {
+                    vec.push(cache)
                 }
             }
 

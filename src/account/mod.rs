@@ -249,7 +249,7 @@ impl Account {
                 let mut file = tokio::fs::File::create(format!("./data/accounts/{}.toml", id))
                     .await
                     .unwrap();
-                file.write(data.as_bytes()).await.unwrap();
+                file.write_all(data.as_bytes()).await.unwrap();
             });
         }
     }
@@ -461,17 +461,14 @@ impl AccountManager {
                     }
                 }
                 {
-                    match account.write().deref_mut() {
-                        Account::Verified { tokens, verify, .. } => {
-                            tokens.refresh();
-                            if match verify {
-                                UserVerifyVariant::None => false,
-                                UserVerifyVariant::ForgetPassword(e) => e.is_expired(),
-                            } {
-                                *verify = UserVerifyVariant::None;
-                            }
+                    if let Account::Verified { tokens, verify, .. } = account.write().deref_mut() {
+                        tokens.refresh();
+                        if match verify {
+                            UserVerifyVariant::None => false,
+                            UserVerifyVariant::ForgetPassword(e) => e.is_expired(),
+                        } {
+                            *verify = UserVerifyVariant::None;
                         }
-                        _ => (),
                     }
                 }
             }

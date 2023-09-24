@@ -123,20 +123,18 @@ impl CacheManager {
             use std::io::Read;
 
             let mut vec = Vec::new();
-            for dir in std::fs::read_dir("./data/images").unwrap() {
-                if let Ok(f) = dir {
-                    if let Ok(cache) = {
-                        toml::from_str::<PostImageCache>(&{
-                            let mut string = String::new();
-                            File::open(f.path())
-                                .unwrap()
-                                .read_to_string(&mut string)
-                                .unwrap();
-                            string
-                        })
-                    } {
-                        vec.push(cache)
-                    }
+            for dir in std::fs::read_dir("./data/images").unwrap().flatten() {
+                if let Ok(cache) = {
+                    toml::from_str::<PostImageCache>(&{
+                        let mut string = String::new();
+                        File::open(dir.path())
+                            .unwrap()
+                            .read_to_string(&mut string)
+                            .unwrap();
+                        string
+                    })
+                } {
+                    vec.push(cache)
                 }
             }
             Self {

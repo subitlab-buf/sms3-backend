@@ -104,13 +104,11 @@ pub async fn new_post(
         },
 
         status: {
-            let mut vec = Vec::new();
-            vec.push(super::PostAcceptationData {
+            vec![super::PostAcceptationData {
                 operator: ctx.account_id,
                 status: super::PostAcceptationStatus::Pending,
                 time: Utc::now(),
-            });
-            vec
+            }]
         },
 
         metadata: super::PostMetadata {
@@ -227,7 +225,7 @@ pub async fn edit_post(
 
         Ok(())
     } else {
-        return Err(ResError(super::Error::NotFound).into());
+        Err(ResError(super::Error::NotFound).into())
     }
 }
 
@@ -353,13 +351,14 @@ fn apply_edit_post_variant(
         }
 
         EditPostVariant::RequestReview(msg) => {
-            if let Some(sms3_shared::post::PostAcceptationData { status, .. }) = post.status.last()
+            if let Some(sms3_shared::post::PostAcceptationData {
+                status: PostAcceptationStatus::Submitted(msg1),
+                ..
+            }) = post.status.last()
             {
-                if let PostAcceptationStatus::Submitted(msg1) = status {
-                    return Err(super::Error::Already(PostAcceptationStatus::Submitted(
-                        msg1.to_string(),
-                    )));
-                }
+                return Err(super::Error::Already(PostAcceptationStatus::Submitted(
+                    msg1.to_string(),
+                )));
             }
 
             post.status.push(super::PostAcceptationData {
@@ -438,15 +437,17 @@ pub async fn approve_post(
 
         match descriptor.variant {
             ApprovePostVariant::Accept(msg) => {
-                if let Some(sms3_shared::post::PostAcceptationData { status, .. }) =
-                    pw.status.last()
+                if let Some(sms3_shared::post::PostAcceptationData {
+                    status: PostAcceptationStatus::Accepted(msg),
+                    ..
+                }) = pw.status.last()
                 {
-                    if let PostAcceptationStatus::Accepted(msg) = status {
-                        return Err(ResError(super::Error::Already(
-                            PostAcceptationStatus::Accepted(msg.to_string()),
-                        ))
-                        .into());
-                    }
+                    return Err(
+                        ResError(super::Error::Already(PostAcceptationStatus::Accepted(
+                            msg.to_string(),
+                        )))
+                        .into(),
+                    );
                 }
 
                 pw.status.push(super::PostAcceptationData {
@@ -457,15 +458,17 @@ pub async fn approve_post(
             }
 
             ApprovePostVariant::Reject(msg) => {
-                if let Some(sms3_shared::post::PostAcceptationData { status, .. }) =
-                    pw.status.last()
+                if let Some(sms3_shared::post::PostAcceptationData {
+                    status: PostAcceptationStatus::Rejected(msg),
+                    ..
+                }) = pw.status.last()
                 {
-                    if let PostAcceptationStatus::Rejected(msg) = status {
-                        return Err(ResError(super::Error::Already(
-                            PostAcceptationStatus::Rejected(msg.to_string()),
-                        ))
-                        .into());
-                    }
+                    return Err(
+                        ResError(super::Error::Already(PostAcceptationStatus::Rejected(
+                            msg.to_string(),
+                        )))
+                        .into(),
+                    );
                 }
 
                 pw.status.push(super::PostAcceptationData {

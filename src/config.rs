@@ -8,7 +8,7 @@ pub static INSTANCE: Lazy<Config> = Lazy::new(|| {
     {
         use std::{fs::File, io::Read};
 
-        return toml::from_str(&{
+        toml::from_str(&{
             let mut string = String::new();
             File::open("./data/config.toml")
                 .unwrap()
@@ -16,7 +16,7 @@ pub static INSTANCE: Lazy<Config> = Lazy::new(|| {
                 .unwrap();
             string
         })
-        .unwrap();
+        .unwrap()
     }
 
     #[cfg(test)]

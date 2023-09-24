@@ -143,8 +143,6 @@ async fn login() {
         verify: crate::account::UserVerifyVariant::None,
     });
 
-    let token;
-
     use sms3_shared::account::handle::AccountLoginDescriptor;
 
     let descriptor = AccountLoginDescriptor {
@@ -181,7 +179,7 @@ async fn login() {
         account_id
     );
 
-    token = response_json
+    let token = response_json
         .as_object()
         .unwrap()
         .get("token")

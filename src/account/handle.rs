@@ -56,7 +56,7 @@ pub async fn verify_account(
                 organization,
                 password,
             } => {
-                if {
+                let res = {
                     let a = account.read();
 
                     if a.email() == email {
@@ -67,7 +67,8 @@ pub async fn verify_account(
                     } else {
                         false
                     }
-                } {
+                };
+                if res {
                     let mut a = account.write();
 
                     a.verify(
@@ -93,7 +94,7 @@ pub async fn verify_account(
             }
 
             AccountVerifyVariant::ResetPassword { email, password } => {
-                if {
+                let res = {
                     let a = account.read();
                     if a.email() == email {
                         let id = a.id();
@@ -103,7 +104,8 @@ pub async fn verify_account(
                     } else {
                         false
                     }
-                } {
+                };
+                if res {
                     let mut a = account.write();
 
                     a.verify(
@@ -488,7 +490,7 @@ pub mod manage {
             .unwrap()
             .write();
 
-        ctx.valid(&a.permissions()).map_err(ResError)?;
+        ctx.valid(a.permissions()).map_err(ResError)?;
         for variant in descriptor.variants {
             apply_account_modify_variant(variant, a.deref_mut(), &ctx).map_err(ResError)?;
         }
@@ -525,7 +527,7 @@ pub mod manage {
                         .read();
                     attributes.permissions = a
                         .permissions()
-                        .into_iter()
+                        .iter()
                         .filter(|e| permissions.contains(e))
                         .copied()
                         .collect();
