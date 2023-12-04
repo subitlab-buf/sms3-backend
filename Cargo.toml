@@ -9,7 +9,7 @@ edition = "2021"
 
 [dependencies]
 tokio = { version = "*", features = ["full"] }
-axum = { version = "0.6", features = ["tracing"] }
+axum = { version = "0.7", features = ["tracing"] }
 tracing = "*"
 tracing-subscriber = { version = "*", features = ["fmt"] }
 serde = { version = "1.0", features = ["derive"] }
