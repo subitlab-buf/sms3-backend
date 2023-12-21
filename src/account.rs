@@ -14,6 +14,7 @@ use crate::{config, Error};
 /// A permission group of an account.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub enum Permission {
+    /// Overpowered account permission.\
     /// Contains all permissions.
     Op,
     /// Post postings.
@@ -57,7 +58,7 @@ impl Display for VerifyVariant {
     }
 }
 
-/// The external data of a verified account.
+/// The external data of a verified account.\
 /// Containing verify sessions.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Ext {
@@ -69,10 +70,10 @@ pub struct Ext {
 /// # Verify Sessions
 ///
 /// Sessions that requires email verifying, like reseting password,
-/// are verify sessions. (See [`VerifyVariant`]).
+/// are verify sessions. (See [`VerifyVariant`])
 /// Verify sessions are stored in external data as [`Ext`].
 ///
-/// Currently, the only verify session is resetting password.
+/// Currently, the only verify session is reset password.
 #[derive(Debug)]
 pub struct Account {
     inner: libaccount::Account<Permission, Ext>,
@@ -237,7 +238,11 @@ impl Unverified {
     #[inline]
     pub fn new(email: String) -> Result<Self, Error> {
         Ok(Self {
-            inner: libaccount::Unverified::new(email, VerifyCx::new())?,
+            inner: libaccount::Unverified::new(
+                email,
+                VerifyCx::new(),
+                siphasher::sip::SipHasher24::new(),
+            )?,
         })
     }
 

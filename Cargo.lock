@@ -685,7 +685,7 @@ dependencies = [
 [[package]]
 name = "libaccount"
 version = "0.1.0"
-source = "git+https://github.com/subitlab-buf/libaccount.git#b92c17b0dd4e8ffac09a1e786f5ce4a65fb1e55e"
+source = "git+https://github.com/subitlab-buf/libaccount.git#86fdfb40b3dff0824657c4fbc7c203c324e3f142"
 dependencies = [
  "rand",
  "serde",
@@ -1164,6 +1164,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "siphasher"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "54ac45299ccbd390721be55b412d41931911f654fa99e2cb8bfb57184b2061fe"
+
+[[package]]
 name = "slab"
 version = "0.4.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1192,6 +1198,7 @@ dependencies = [
  "rand",
  "serde",
  "serde_repr",
+ "siphasher",
  "thiserror",
  "time",
  "tokio",
