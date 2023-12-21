@@ -1,43 +1,8 @@
-[workspace]
-resolver = "2"
-members = ["shared"]
-
 [package]
 name = "sms3-backend"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
 [dependencies]
-tokio = { version = "*", features = ["full"] }
-axum = { version = "0.6", features = ["tracing"] }
-tracing = "*"
-tracing-subscriber = { version = "*", features = ["fmt"] }
-serde = { version = "1.0", features = ["derive"] }
-lettre = { version = "0.11", default-features = false, features = [
-  "serde",
-  "tokio1-rustls-tls",
-  "smtp-transport",
-  "pool",
-  "hostname",
-  "builder",
-] }
-chrono = { version = "0.4", features = ["serde"] }
-once_cell = "*"
-rand = "*"
-serde_json = "*"
-toml = "0.8"
-sha256 = "*"
-image = "0.24"
-sms3-shared = { version = "*", path = "shared" }
-parking_lot = "*"
-dashmap = "*"
-mime = "*"
-thiserror = "*"
-hyper = { version = "*", default-features = false }
-
-[dev-dependencies]
-serial_test = "*"
-axum-macros = "*"
-tower = { version = "0.4", features = ["util"] }
-hyper = { version = "0.14", features = ["full"] }
-
