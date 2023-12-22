@@ -14,6 +14,8 @@ pub enum Error {
     LibAccount(libaccount::Error),
     #[error("verify session \"{0}\" not found")]
     VerifySessionNotFound(VerifyVariant),
+    #[error("permission denied")]
+    PermissionDenied,
 
     #[error("captcha incorrect")]
     CaptchaIncorrect,
@@ -26,6 +28,9 @@ pub enum Error {
     Lettre(lettre::error::Error),
     #[error("failed to send email")]
     Smtp(smtp::Error),
+
+    #[error("resource upload session {0} not found")]
+    ResourceUploadSessionNotFound(u64),
 }
 
 /// Implements `From<T>` for [`Error`].
