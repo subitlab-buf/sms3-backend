@@ -29,8 +29,8 @@ pub enum Permission {
 
 impl libaccount::Permission for Permission {
     #[inline]
-    fn default_set() -> libaccount::Permissions<Self> {
-        libaccount::Permissions::empty()
+    fn default_set() -> std::collections::HashSet<Self> {
+        [Self::Post, Self::GetPubPost].into()
     }
 
     #[inline]
@@ -39,6 +39,62 @@ impl libaccount::Permission for Permission {
             (self, permission),
             (Permission::Op, _) | (Permission::Post, Permission::GetPubPost)
         )
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Hash)]
+#[serde(tag = "entry", content = "value")]
+pub enum Tag {
+    Perm(Permission),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TagEntry {
+    Permission,
+}
+
+impl libaccount::tag::Tag for Tag {
+    type Entry = TagEntry;
+
+    #[inline]
+    fn as_entry(&self) -> Self::Entry {
+        match self {
+            Tag::Perm(_) => TagEntry::Permission,
+        }
+    }
+}
+
+impl libaccount::tag::AsPermission for Tag {
+    type Permission = Permission;
+
+    #[inline]
+    fn as_permission(&self) -> Option<&Self::Permission> {
+        #[allow(irrefutable_let_patterns)]
+        if let Self::Perm(p) = self {
+            Some(p)
+        } else {
+            None
+        }
+    }
+}
+
+impl From<Permission> for Tag {
+    #[inline]
+    fn from(value: Permission) -> Self {
+        Self::Perm(value)
+    }
+}
+
+impl libaccount::tag::PermissionEntry for TagEntry {
+    const VALUE: Self = Self::Permission;
+}
+
+impl libaccount::tag::UserDefinableEntry for TagEntry {
+    #[inline]
+    fn is_user_defineable(&self) -> bool {
+        match self {
+            TagEntry::Permission => false,
+        }
     }
 }
 
@@ -76,7 +132,7 @@ pub struct Ext {
 /// Currently, the only verify session is reset password.
 #[derive(Debug)]
 pub struct Account {
-    inner: libaccount::Account<Permission, Ext>,
+    inner: libaccount::Account<Tag, Ext>,
 }
 
 impl Account {
@@ -167,9 +223,9 @@ impl Account {
     }
 }
 
-impl From<libaccount::Account<Permission, Ext>> for Account {
+impl From<libaccount::Account<Tag, Ext>> for Account {
     #[inline]
-    fn from(inner: libaccount::Account<Permission, Ext>) -> Self {
+    fn from(inner: libaccount::Account<Tag, Ext>) -> Self {
         Self { inner }
     }
 }
@@ -189,7 +245,7 @@ impl dmds::Data for Account {
     fn decode<B: bytes::Buf>(version: u32, dims: &[u64], buf: B) -> std::io::Result<Self> {
         match version {
             1 => {
-                let mut inner: libaccount::Account<Permission, Ext> =
+                let mut inner: libaccount::Account<Tag, Ext> =
                     bincode::deserialize_from(buf.reader())
                         .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))?;
                 unsafe { inner.initialize_id(dims[0]) };
@@ -207,7 +263,7 @@ impl dmds::Data for Account {
 }
 
 impl Deref for Account {
-    type Target = libaccount::Account<Permission, Ext>;
+    type Target = libaccount::Account<Tag, Ext>;
 
     #[inline]
     fn deref(&self) -> &Self::Target {
@@ -445,19 +501,22 @@ impl Display for Captcha {
     }
 }
 
-impl libaccount::ExtVerify<()> for VerifyCx {
+impl libaccount::ExtVerify<Tag, ()> for VerifyCx {
     type Args = Captcha;
     type Error = Error;
 
     fn into_verified_ext(
         self,
-        args: &libaccount::VerifyDescriptor<Self::Args>,
+        args: &mut libaccount::VerifyDescriptor<Tag, Self::Args>,
     ) -> Result<(), Self::Error> {
         // Validate the captcha.
-        if self.captcha == args.ext_args {
-            Ok(())
-        } else {
-            Err(Error::CaptchaIncorrect)
+        if self.captcha != args.ext_args {
+            return Err(Error::CaptchaIncorrect);
         }
+
+        args.tags.retain_user_definable();
+        args.tags.initialize_permissions();
+
+        Ok(())
     }
 }

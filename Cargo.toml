@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 axum = "0.7"
-libaccount = { version = "0.1", git = "https://github.com/subitlab-buf/libaccount.git" }
+libaccount = { version = "0.1", git = "https://github.com/subitlab-buf/libaccount.git", branch = "tags" }
 dmds = "0.2"
 dmds-tokio-fs = "0.2"
 tokio = { version = "1.35", features = ["full"] }
