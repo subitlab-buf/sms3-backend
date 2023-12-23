@@ -1,4 +1,4 @@
-use account::VerifyVariant;
+use account::verify::VerifyVariant;
 use lettre::transport::smtp;
 
 pub mod config;
