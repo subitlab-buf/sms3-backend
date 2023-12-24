@@ -8,7 +8,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{config, Error};
 
-use self::verify::{Captcha, VerifyCx, VerifyVariant};
+use self::{
+    department::Department,
+    verify::{Captcha, VerifyCx, VerifyVariant},
+};
 
 pub mod department;
 pub mod verify;
@@ -31,6 +34,10 @@ pub enum Permission {
 
     /// Manage possible departments.
     ManageDepartments,
+
+    /// Appends or removes permissions from
+    /// an account.
+    SetPermissions,
 }
 
 impl libaccount::Permission for Permission {
@@ -49,14 +56,16 @@ impl libaccount::Permission for Permission {
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Hash)]
-#[serde(tag = "entry", content = "value")]
+#[serde(tag = "entry", content = "tag")]
 pub enum Tag {
-    Perm(Permission),
+    Permission(Permission),
+    Department(Department),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TagEntry {
     Permission,
+    Department,
 }
 
 impl libaccount::tag::Tag for Tag {
@@ -65,7 +74,8 @@ impl libaccount::tag::Tag for Tag {
     #[inline]
     fn as_entry(&self) -> Self::Entry {
         match self {
-            Tag::Perm(_) => TagEntry::Permission,
+            Tag::Permission(_) => TagEntry::Permission,
+            Tag::Department(_) => TagEntry::Department,
         }
     }
 }
@@ -74,9 +84,8 @@ impl libaccount::tag::AsPermission for Tag {
     type Permission = Permission;
 
     #[inline]
-    fn as_permission(&self) -> Option<&Self::Permission> {
-        #[allow(irrefutable_let_patterns)]
-        if let Self::Perm(p) = self {
+    fn as_permission(&self) -> Option<&<Tag as libaccount::tag::AsPermission>::Permission> {
+        if let Self::Permission(p) = self {
             Some(p)
         } else {
             None
@@ -87,7 +96,7 @@ impl libaccount::tag::AsPermission for Tag {
 impl From<Permission> for Tag {
     #[inline]
     fn from(value: Permission) -> Self {
-        Self::Perm(value)
+        Self::Permission(value)
     }
 }
 
@@ -98,9 +107,7 @@ impl libaccount::tag::PermissionEntry for TagEntry {
 impl libaccount::tag::UserDefinableEntry for TagEntry {
     #[inline]
     fn is_user_defineable(&self) -> bool {
-        match self {
-            TagEntry::Permission => false,
-        }
+        !matches!(self, TagEntry::Permission)
     }
 }
 

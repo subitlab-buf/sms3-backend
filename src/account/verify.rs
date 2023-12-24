@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{collections::HashMap, fmt::Display};
 
 use lettre::{transport::smtp, AsyncSmtpTransport};
 use rand::Rng;
@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::{config, Error};
+
+use super::Ext;
 
 /// Verify session variant for a verified account.
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Hash)]
@@ -148,14 +150,14 @@ impl Display for Captcha {
     }
 }
 
-impl libaccount::ExtVerify<super::Tag, ()> for VerifyCx {
+impl libaccount::ExtVerify<super::Tag, Ext> for VerifyCx {
     type Args = Captcha;
     type Error = Error;
 
     fn into_verified_ext(
         self,
         args: &mut libaccount::VerifyDescriptor<super::Tag, Self::Args>,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<Ext, Self::Error> {
         // Validate the captcha.
         if self.captcha != args.ext_args {
             return Err(Error::CaptchaIncorrect);
@@ -164,6 +166,8 @@ impl libaccount::ExtVerify<super::Tag, ()> for VerifyCx {
         args.tags.retain_user_definable();
         args.tags.initialize_permissions();
 
-        Ok(())
+        Ok(Ext {
+            verifies: HashMap::new(),
+        })
     }
 }

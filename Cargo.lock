@@ -212,9 +212,9 @@ dependencies = [
 
 [[package]]
 name = "crossbeam-utils"
-version = "0.8.17"
+version = "0.8.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c06d96137f14f244c37f989d9fff8f95e6c18b918e71f36638f8c49112e4c78f"
+checksum = "c3a430a770ebd84726f584a90ee7f020d28db52c6d02138900f22341f866d39c"
 dependencies = [
  "cfg-if",
 ]
@@ -691,7 +691,7 @@ dependencies = [
 [[package]]
 name = "libaccount"
 version = "0.1.0"
-source = "git+https://github.com/subitlab-buf/libaccount.git?branch=tags#30bf26f2f49997659a6b0afbfcd38335f4e52564"
+source = "git+https://github.com/subitlab-buf/libaccount.git?branch=tags#df1b81927af3a274d8f36c5a841d5a358d81d85d"
 dependencies = [
  "rand",
  "serde",
@@ -805,9 +805,9 @@ dependencies = [
 
 [[package]]
 name = "object"
-version = "0.32.1"
+version = "0.32.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9cf5f9dd3933bd50a9e1f149ec995f39ae2c496d31fd772c1fd45ebc27e902b0"
+checksum = "a6a622008b6e321afc04970976f62ee297fdbaa6f95318ca343e3eebb9648441"
 dependencies = [
  "memchr",
 ]
@@ -1194,6 +1194,7 @@ checksum = "4dccd0940a2dcdf68d092b8cbab7dc0ad8fa938bf95787e1b916b0e3d0e8e970"
 name = "sms3-backend"
 version = "0.2.0"
 dependencies = [
+ "async-trait",
  "axum",
  "bincode",
  "bytes",

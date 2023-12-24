@@ -12,6 +12,7 @@ pub struct Config {
 pub struct Smtp {
     /// The SMTP Server address.
     pub server: String,
+    /// The SMTP Server port.
     #[serde(default)]
     pub port: Option<u16>,
 
@@ -21,7 +22,8 @@ pub struct Smtp {
     pub username: String,
     pub password: String,
 
-    /// The auth mechanism.\
+    /// The auth mechanism.
+    ///
     /// Serialized and deserialized as `PascalCase`.
     pub auth: Vec<smtp::authentication::Mechanism>,
 }
